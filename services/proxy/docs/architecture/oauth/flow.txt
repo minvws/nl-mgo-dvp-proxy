@@ -1,0 +1,57 @@
+# https://sequencediagram.org/
+
+participant Web app
+
+participant User agent
+
+
+participant Proxy
+participant Authorization Server / DVA
+participant Token Server
+participant Resource Server
+
+
+group Start flow initialisation
+Web app->Proxy:Initiate authorization request\n POST with:\n\nToken server URL\nAuthorization server URL\nMedMij scope\nClient target URL
+Proxy->Proxy:generate state token with:\nToken server URL\nClient target URL\nTTL\nCorrelation-ID
+Proxy->Web app:send url_to_request
+end
+
+group retrieve access token
+Web app->User agent:trigger browser to request url_to_request
+User agent->Authorization Server / DVA:Start authentication flow with state from Proxy
+
+
+
+Authorization Server / DVA->Authorization Server / DVA:Request consent from user
+note over Authorization Server / DVA:User agrees with shown scopes by confirming consent
+
+Authorization Server / DVA->User agent:Respond with 301 redirect with authorization code
+
+User agent->Proxy:Open redirect URL with authorization code and state
+
+Proxy->Proxy:Verify state param
+Proxy->Proxy:generate new X-MedMij-ID
+Proxy->Token Server:Request access token using authorization code with:\n- X-MedMij-ID\n- Correlation id
+
+Token Server->Proxy:Respond with access token and refresh token
+User agent<-Proxy:301 to client target URL + access_token data + X-correlation-ID
+User agent->Web app:Store access_token data and X-correlation-ID
+end
+
+group Request resources with access token
+
+Web app->Proxy:Request resources with access token and X-correlation-ID via Proxy
+Proxy->Resource Server:Request resources with access token and X-correlation-ID
+
+Resource Server->Proxy:Respond with requested resources
+Proxy->Web app:Respond with requested resources
+end
+
+group Request new access token with refresh token
+Web app->Proxy:Request new access_token with refresh_token and X-correlation-ID from session
+Proxy->Token Server:Request new access_token with  refresh token and X-correlation-ID
+
+Token Server->Proxy:Respond with new access token data
+Proxy->Web app:Respond with new access token data
+end

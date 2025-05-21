@@ -1,0 +1,49 @@
+#!/bin/sh
+
+###
+### Generate certificates for testing with mtls
+###
+
+ECHO "Generating certificates for testing with mtls"
+
+OUTPUT=${CERTS_OUTPUT_DIR:-out}
+mkdir -p $OUTPUT
+
+openssl req -x509 -new -nodes -days 365 -keyout "$OUTPUT/ca.key" -out "$OUTPUT/ca.crt" -subj "/CN=example-ca"
+
+openssl req -new -nodes -newkey rsa:2048 -keyout "$OUTPUT/server.key" -out "$OUTPUT/server.csr" -subj "/CN=mock"
+
+openssl x509 -req -in "$OUTPUT/server.csr" -CA "$OUTPUT/ca.crt" -CAkey "$OUTPUT/ca.key" -CAcreateserial -out "$OUTPUT/server.crt" -days 365
+
+openssl req -new -nodes -newkey rsa:2048 -keyout "$OUTPUT/client.key" -out "$OUTPUT/client.csr" -subj "/CN=client"
+
+openssl x509 -req -in "$OUTPUT/client.csr" -CA "$OUTPUT/ca.crt" -CAkey "$OUTPUT/ca.key" -CAcreateserial -out "$OUTPUT/client.crt" -days 365
+
+openssl req -new -key "$OUTPUT/server.key" -out "$OUTPUT/server.csr" -config san_config.cnf
+
+openssl x509 -req -in "$OUTPUT/server.csr" -CA "$OUTPUT/ca.crt" -CAkey "$OUTPUT/ca.key" -CAcreateserial -out "$OUTPUT/server.crt" -days 365 -extfile san_config.cnf -extensions v3_req
+
+
+###
+### Generate certs for using redis with tls locally
+###
+
+CA_CERT_FILE="$OUTPUT/ca.crt"
+CA_KEY_FILE="$OUTPUT/ca.key"
+
+CERT_FILE="$OUTPUT/redis-local.crt"
+KEY_FILE="$OUTPUT/redis-local.key"
+CSR_FILE="$OUTPUT/redis-local.csr"
+
+# Generate a key
+openssl genpkey -algorithm RSA -out $KEY_FILE
+
+# Generate a CSR based on the key
+openssl req -new -key $KEY_FILE -out $CSR_FILE -subj "/C=US/ST=State/L=City/O=Organization/OU=Department/CN=localhost"
+
+# Sign the cert with the CA
+openssl x509 -req -in $CSR_FILE -CA $CA_CERT_FILE -CAkey $CA_KEY_FILE -CAcreateserial -out $CERT_FILE -days 365 -sha256
+
+echo "Generated Redis cert and key signed by CA at $CERT_FILE and $KEY_FILE"
+
+rm $CSR_FILE

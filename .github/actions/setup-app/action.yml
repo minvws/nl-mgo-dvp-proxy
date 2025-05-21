@@ -1,0 +1,32 @@
+name: "Setup app"
+description: "Installs Python and Poetry packages for an application in a given directory."
+inputs:
+    app-dir:
+        description: Path to Python application
+        required: true
+runs:
+    using: "composite"
+
+    steps:
+        - name: Update PATH
+          shell: bash
+          run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+        - name: Install poetry
+          shell: bash
+          run: pip3 install poetry==1.8.*
+
+        - uses: actions/setup-python@v5
+          with:
+              python-version: "3.11"
+              cache: poetry
+
+        - name: Set Poetry environment
+          shell: bash
+          working-directory: ${{ inputs.app-dir }}
+          run: poetry env use 3.11
+
+        - name: Install dependencies
+          shell: bash
+          working-directory: ${{ inputs.app-dir }}
+          run: poetry install --no-root --no-interaction --no-ansi

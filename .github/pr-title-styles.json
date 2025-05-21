@@ -1,0 +1,9 @@
+{
+    "LABEL": {
+        "name": "Title needs formatting: Eg MGO-1234: Title, Release v1.2.3: Title",
+        "color": "EEEEEE"
+    },
+    "CHECKS": {
+        "regexp": "^((?:MGO-[0-9].+)|(?:Release\\sv[0-9]+\\.[0-9]+\\.[0-9]+: .+))$"
+    }
+}

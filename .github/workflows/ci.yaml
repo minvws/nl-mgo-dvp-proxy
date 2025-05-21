@@ -1,0 +1,161 @@
+name: CI
+
+on:
+    workflow_dispatch:
+    pull_request:
+        types: [opened, synchronize, reopened]
+    push:
+        branches:
+            - develop
+            - main
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    setup:
+        name: Setup
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Setup app
+              uses: ./.github/actions/setup-app
+              with:
+                app-dir: ./services/proxy
+
+    lint:
+        name: Run code linter
+        runs-on: ubuntu-latest
+        needs: setup
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Setup app
+              uses: ./.github/actions/setup-app
+              with:
+                app-dir: ./services/proxy
+
+            - name: Lint
+              working-directory: ./services/proxy
+              run: poetry run $(make lint --just-print --silent)
+
+    format:
+        name: Run formatter
+        runs-on: ubuntu-latest
+        needs: setup
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Setup app
+              uses: ./.github/actions/setup-app
+              with:
+                app-dir: ./services/proxy
+
+            - name: Find format differences
+              working-directory: ./services/proxy
+              run: poetry run ruff format --diff
+
+    type-check:
+        name: Check static types
+        runs-on: ubuntu-latest
+        needs: setup
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Setup app
+              uses: ./.github/actions/setup-app
+              with:
+                app-dir: ./services/proxy
+
+            - name: Check static types
+              working-directory: ./services/proxy
+              run: poetry run $(make type-check --just-print --silent)
+
+    spelling-check:
+        name: Run spelling check
+        runs-on: ubuntu-latest
+        needs: setup
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Setup app
+              uses: ./.github/actions/setup-app
+              with:
+                app-dir: ./services/proxy
+
+            - name: Run spelling check
+              working-directory: ./services/proxy
+              run: poetry run $(make spelling-check --just-print --silent)
+
+    test:
+        name: Run the tests
+        runs-on: ubuntu-latest
+        needs: setup
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Setup app
+              uses: ./.github/actions/setup-app
+              with:
+                app-dir: ./services/proxy
+
+            - name: Generate certificates
+              working-directory: ./services/certsmanager
+              run: CERTS_OUTPUT_DIR=../proxy/certs/out ./generate
+
+            - name: Generate keys
+              working-directory: ./services/proxy
+              run: |
+                poetry run python tools/generate_oauth_state_signing_key.py secrets/oauth_state_signing_key.key --force
+                poetry run python tools/generate-client-assertion-jwt-key-pair.py
+                poetry run python tools/generate-oidc-state-secret.py
+
+            - name: Copy "app.conf.test" to "app.conf"
+              working-directory: ./services/proxy
+              run: cp app.conf.test app.conf
+
+            - name: Run the tests
+              working-directory: ./services/proxy
+              run: poetry run $(make test-cov-xml --just-print --silent)
+
+            - name: Upload coverage report
+              uses: actions/upload-artifact@v4
+              with:
+                name: coverage-proxy
+                path: services/proxy
+
+    sonar:
+        name: SonarCloud
+        runs-on: ubuntu-latest
+        needs: test
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+              with:
+                fetch-depth: 0
+
+            - name: Download coverage report
+              uses: actions/download-artifact@v4
+              with:
+                name: coverage-proxy
+                path: services/proxy
+
+            - name: Run SonarCloud scanner
+              uses: minvws/nl-irealisatie-generic-pipelines/.github/actions/sonarcloud@main
+              with:
+                sonar-token: ${{ secrets.SONAR_TOKEN }}
+                project-base-dir: services/proxy

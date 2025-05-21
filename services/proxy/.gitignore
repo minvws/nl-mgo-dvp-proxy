@@ -1,0 +1,4 @@
+/.coverage
+/app.conf
+/coverage.xml
+/secrets

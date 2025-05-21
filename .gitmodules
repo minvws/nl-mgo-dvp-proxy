@@ -1,0 +1,4 @@
+[submodule "services/nl-mgo-dva-mock-private"]
+path = services/nl-mgo-dva-mock-private
+url = git@github.com:minvws/nl-mgo-dva-mock-private.git
+branch = develop

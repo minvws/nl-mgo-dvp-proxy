@@ -1,0 +1,8 @@
+security:
+    ignore-cvss-severity-below: 0
+    ignore-cvss-unknown-severity: False
+    ignore-vulnerabilities:
+        70612:
+            reason: "we don't actually use jinja2 and there is no fix at this moment in time. It's a dependency of the safety package itself, which is only executed in CI: https://github.com/pyupio/safety/issues/539"
+            expires: "2025-01-10"
+    continue-on-vulnerability-error: False

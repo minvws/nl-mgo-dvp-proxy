@@ -1,0 +1,20 @@
+services:
+    mock:
+        build:
+            context: ./services/nl-mgo-dva-mock-private
+            dockerfile: docker/Dockerfile
+            args:
+                - PROJECT_DIR=/src/services/nl-mgo-dva-mock-private
+        volumes:
+            - .:/src
+            - certs:/src/services/nl-mgo-dva-mock-private/certs
+    proxy:
+        build:
+            context: ./services/proxy
+            dockerfile: docker/Dockerfile
+            args:
+                - PROJECT_DIR=/src/services/proxy
+        volumes:
+            - .:/src
+            - certs:/src/services/proxy/certs
+

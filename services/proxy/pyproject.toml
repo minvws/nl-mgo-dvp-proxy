@@ -1,0 +1,82 @@
+[tool.poetry]
+name = "proxy"
+version = "0.12.0"
+description = "Proxy between Client SDK and DVA (Dienstverlener Aanbieder)."
+license = "EUPL-1.2"
+authors = ["Ministerie van Volksgezondheid, Welzijn en Sport"]
+repository = "https://github.com/minvws/nl-mgo-dvp-proxy-private"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+uvicorn = "^0.34"
+fastapi = "^0.115"
+mypy = "^1.15"
+requests = "^2.32"
+statsd = "^4.0"
+cryptography = "^44.0"
+inject = "^5.2"
+httpx = "^0.28"
+opentelemetry-instrumentation-fastapi = "v0.49b0"
+opentelemetry-exporter-otlp = "^1.27.0"
+opentelemetry-api = "^1.27.0"
+opentelemetry-sdk = "^1.27.0"
+redis = "^5.2.1"
+jwcrypto = "^1.5.6"
+python-json-logger = "^3.3.0"
+async-timeout = "^5.0.1"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3"
+pytest-cov = "^6.1"
+pytest-mock = "^3.14"
+pytest-asyncio = "^0.26"
+ruff = "^0.11"
+codespell = "^2.4.1"
+types-requests = "^2.32.0.20250328"
+faker = "^37.1"
+freezegun = "^1.5.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+cache-dir = "~/.cache/ruff"
+include = [
+    "pyproject.toml",
+    "app/*.py",
+    "tests/*.py",
+]
+
+[tool.ruff.lint]
+select = ["TID251", "TID252", "F401"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"unittest".msg = "use pytest-mock instead"
+
+[tool.mypy]
+files = "app,tests"
+python_version = "3.12"
+strict = true
+cache_dir = "~/.cache/mypy"
+
+[[tool.mypy.overrides]]
+module = "statsd"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "jwcrypto"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+cache_dir = "~/.cache/pytest"
+testpaths = [
+    "tests",
+]
+
+[tool.codespell]
+skip = [
+    "./certs/*",
+    "./secrets/*",
+    "./static/*.js"
+]

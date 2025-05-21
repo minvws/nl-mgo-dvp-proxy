@@ -1,0 +1,97 @@
+name: Validate PR description
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+
+jobs:
+  validate-description:
+    if: startsWith(github.head_ref, 'feature/') || startsWith(github.head_ref, 'release/')
+    name: Validate PR description
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Set variables
+        id: vars
+        run: |
+          set -euo pipefail
+
+          SOURCE_BRANCH="${{ github.head_ref }}"
+          COMMIT_SHA="${{ github.event.pull_request.head.sha }}"
+          DEFAULT_TEMPLATE_PATH=".github/pull_request_template.md"
+
+          if [[ "$SOURCE_BRANCH" == feature/* ]]; then
+            TEMPLATE_PATH=".github/PULL_REQUEST_TEMPLATE/feature_template.md"
+          elif [[ "$SOURCE_BRANCH" == release/* ]]; then
+            TEMPLATE_PATH=".github/PULL_REQUEST_TEMPLATE/release_template.md"
+          else
+            echo "Unsupported branch type: $SOURCE_BRANCH"
+            exit 1
+          fi
+
+          echo "SOURCE_BRANCH=$SOURCE_BRANCH" >> "$GITHUB_ENV"
+          echo "COMMIT_SHA=$COMMIT_SHA" >> "$GITHUB_ENV"
+          echo "TEMPLATE_PATH=$TEMPLATE_PATH" >> "$GITHUB_ENV"
+          echo "DEFAULT_TEMPLATE_PATH=$DEFAULT_TEMPLATE_PATH" >> "$GITHUB_ENV"
+
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - name: Fetch branch-specific PR template
+        run: |
+          echo "Fetching branch-specific PR template from path $TEMPLATE_PATH"
+
+          if [ ! -f "$TEMPLATE_PATH" ]; then
+            echo "ERROR: Branch-specific PR template not found at $TEMPLATE_PATH"
+            exit 1
+          fi
+          cp "$TEMPLATE_PATH" pr_template.txt
+
+      - name: Check if PR has a description
+        run: |
+          PR_BODY=$(jq --raw-output ".pull_request.body // empty" "$GITHUB_EVENT_PATH")
+          echo "PR Body: '$PR_BODY'"
+          if [ -z "$PR_BODY" ]; then
+            echo "ERROR: The PR does not contain a description."
+            exit 1
+          fi
+          echo "$PR_BODY" > pr_body.txt
+
+      - name: Fetch default PR template
+        run: |
+          echo "Fetching default PR template from path $DEFAULT_TEMPLATE_PATH"
+
+          if [ ! -f "$DEFAULT_TEMPLATE_PATH" ]; then
+            echo "WARNING: Default PR template not found at $DEFAULT_TEMPLATE_PATH, skipping comparison."
+            touch default_pr_template.txt
+          else
+            cp "$DEFAULT_TEMPLATE_PATH" default_pr_template.txt
+          fi
+
+      - name: Compare PR body to templates
+        run: |
+          function normalize_and_compare() {
+            local body_file="$1"
+            local template_file="$2"
+            local label="$3"
+
+            sed '/^\s*$/d' "$body_file" | sed 's/[[:space:]]//g' > body_clean.txt
+            sed '/^\s*$/d' "$template_file" | sed 's/[[:space:]]//g' > template_clean.txt
+
+            if cmp -s body_clean.txt template_clean.txt; then
+              echo "ERROR: PR description matches the $label template too closely. Please provide a meaningful description."
+              exit 1
+            else
+              echo "PR description differs sufficiently from the $label template."
+            fi
+          }
+
+          normalize_and_compare pr_body.txt default_pr_template.txt "default"
+          normalize_and_compare pr_body.txt pr_template.txt "branch-specific"
+
+      - name: Ensure all checkboxes are checked
+        uses: mheap/require-checklist-action@v2
