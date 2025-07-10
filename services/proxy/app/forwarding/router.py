@@ -16,7 +16,7 @@ router = APIRouter()
 
 
 @router.get(
-    path="/{path:path}",
+    path="/fhir/{path:path}",
     description="Forwards a request through the proxy towards a healthcare provider.",
     openapi_extra={
         "parameters": [

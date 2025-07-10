@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Response
+from fastapi import APIRouter
 
 from app.utils import resolve_instance
 from app.version.models import VersionInfo
@@ -6,8 +6,8 @@ from app.version.models import VersionInfo
 router = APIRouter()
 
 
-@router.get("/")
-def get_version(version_info: VersionInfo = resolve_instance(VersionInfo)) -> Response:
-    return Response(
-        f"Release version: {version_info.release_version}\nGit ref: {version_info.git_ref}"
-    )
+@router.get("/", response_model=VersionInfo)
+def get_version(
+    version_info: VersionInfo = resolve_instance(VersionInfo),
+) -> VersionInfo:
+    return version_info

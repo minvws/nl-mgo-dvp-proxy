@@ -30,7 +30,8 @@ RUN apt update && \
     git \
     gnupg2 \
     make \
-    vim
+    vim \
+    curl
 
 RUN pip3 install --upgrade pip && \
     pip3 install poetry==1.8.* --no-cache-dir

@@ -1,6 +1,7 @@
-from pydantic import BaseModel
+from dataclasses import dataclass
 
 
-class VersionInfo(BaseModel):
-    release_version: str
+@dataclass(frozen=True)
+class VersionInfo:
+    version: str
     git_ref: str

@@ -42,15 +42,15 @@ reset_timeout=10
 state_storage=in_memory
 
 [redis]
-;host=
-;port=
+;host=redis
+;port=6379
 ;username=
 ;password=
-;ssl=
-;mutual_auth
-;ssl_certfile=
-;ssl_keyfile=
-;ssl_ca_certs=
+;ssl=True
+;mutual_auth=False
+;ssl_certfile=/src/certs/out/redis-local.crt
+;ssl_keyfile=/src/certs/out/redis-local.key
+;ssl_ca_certs=/src/certs/out/ca.crt
 
 [oauth]
 state_signing_key_paths=/src/secrets/oauth_state_signing_key.key

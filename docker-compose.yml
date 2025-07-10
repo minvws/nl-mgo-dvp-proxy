@@ -30,7 +30,6 @@ services:
             - 8002:443
         volumes:
             - ./services/nl-mgo-dva-mock-private:/src
-            - ./docker/mock/app.conf:/src/app.conf
             - certs:/src/certs:ro
 
     certsmanager:
@@ -43,19 +42,19 @@ services:
             - certs:/certs
 
     redis:
-        image: redis:latest
+        image: redis:6.2
         depends_on:
             - certsmanager
         volumes:
             - certs:/src/certs:ro
         command: >
             redis-server
-                        --port 0
-                        --tls-port 6379
-                        --tls-cert-file /src/certs/out/redis-local.crt
-                        --tls-key-file /src/certs/out/redis-local.key
-                        --tls-ca-cert-file /src/certs/out/ca.crt
-                        --tls-auth-clients no
+                --port 0
+                --tls-port 6379
+                --tls-cert-file /src/certs/out/redis-local.crt
+                --tls-key-file /src/certs/out/redis-local.key
+                --tls-ca-cert-file /src/certs/out/ca.crt
+                --tls-auth-clients no
         restart: unless-stopped
 
     jaeger:

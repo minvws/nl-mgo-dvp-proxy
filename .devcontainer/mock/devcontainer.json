@@ -8,6 +8,7 @@
     "workspaceFolder": "/src/services/nl-mgo-dva-mock-private",
     "shutdownAction": "stopCompose",
     "remoteUser": "app",
+    "initializeCommand": ".devcontainer/init.sh",
     "customizations": {
         "vscode": {
             "extensions": [

@@ -5,7 +5,6 @@ from fastapi.staticfiles import StaticFiles
 
 from .authentication.router import router as auth_router
 from .bindings import configure_bindings
-from .config.models import AppConfig
 from .constants import APP_NAME
 from .docs.router import router as docs_router
 from .exception_handlers import ExceptionHandlers
@@ -24,11 +23,10 @@ def create_app() -> FastAPI:
         )
 
     version_info: VersionInfo = inject.instance(VersionInfo)
-    app_config: AppConfig = inject.instance(AppConfig)
 
     app = FastAPI(
         title=APP_NAME,
-        version=version_info.release_version,
+        version=version_info.version,
         docs_url=None,
         redoc_url=None,
     )

@@ -1,0 +1,34 @@
+name: Create release packages
+
+on:
+  push:
+    tags:
+      - v*
+
+env:
+  PACKAGE_FILE_NAME: "mgo-dvp-proxy"
+  WORKING_DIRECTORY: "./services/proxy"
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  src-package:
+    name: Create source package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run source package action
+        uses: minvws/nl-irealisatie-generic-pipelines/.github/actions/src-package@main
+        with:
+          include_paths: "app static tools app.conf.example HOSTING_CHANGELOG.md"
+          package_file_name: ${{ env.PACKAGE_FILE_NAME }}
+          working_directory: ${{ env.WORKING_DIRECTORY }}
+
+  venv-package:
+    name: Create venv package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run venv package action
+        uses: minvws/nl-irealisatie-generic-pipelines/.github/actions/python-venv-package@main
+        with:
+          python_version: ${{ env.PYTHON_VERSION }}
+          package_file_name: ${{ env.PACKAGE_FILE_NAME }}
+          working_directory: ${{ env.WORKING_DIRECTORY }}

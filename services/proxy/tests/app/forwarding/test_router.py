@@ -18,7 +18,7 @@ from tests.utils import configure_bindings
 
 class TestRouter:
     def test_handle_missing_header(self, test_client: TestClient) -> None:
-        response = test_client.get("/48/fhir/Patient")
+        response = test_client.get("/fhir/Patient")
         assert response.status_code == 422
 
         expected_response = {
