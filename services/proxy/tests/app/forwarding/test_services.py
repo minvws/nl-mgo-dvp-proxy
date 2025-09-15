@@ -1,23 +1,22 @@
 from logging import Logger
 
 import pytest
-from fastapi import HTTPException, Request, Response
+from fastapi import Request, Response
 from httpx import AsyncClient
 from httpx import Response as HttpxResponse
 from pydantic import AnyHttpUrl
 from pytest_mock import MockerFixture
 
 from app.circuitbreaker.services import CircuitBreakerService
-from app.forwarding.constants import FORWARD_URL_RESPONSE_HEADER
-from app.forwarding.models import DvaTarget
-from app.forwarding.schemas import ProxyHeaders
-from app.forwarding.services import ForwardingService
-from app.forwarding.signing.exceptions import (
-    DisallowedTargetHost,
-    InvalidTargetUrlSignature,
-    MissingTargetUrlSignature,
+from app.forwarding.constants import (
+    MEDMIJ_CORRELATION_ID_HEADER,
+    MEDMIJ_REQUEST_ID_HEADER,
+    FORWARD_URL_RESPONSE_HEADER,
 )
-from app.forwarding.signing.services import DvaTargetVerifier
+
+from app.forwarding.models import DvaTarget
+from app.forwarding.schemas import ForwardingRequest
+from app.forwarding.services import ForwardingService
 
 
 @pytest.fixture
@@ -31,106 +30,24 @@ def forwarding_service(mocker: MockerFixture) -> ForwardingService:
     return forwarding_service
 
 
-@pytest.mark.asyncio
-async def test_verify_dva_target_success(
-    forwarding_service: ForwardingService, mocker: MockerFixture
+def test_get_forward_headers_is_successful(
+    forwarding_service: ForwardingService,
 ) -> None:
-    mock_verifier: DvaTargetVerifier = mocker.Mock(DvaTargetVerifier)
-    mock_headers = ProxyHeaders(
-        accept="application/fhir+json; fhirVersion=3.0",
-        dva_target=AnyHttpUrl("https://example.com/resource"),
-        x_mgo_provider_id="eenofanderezorgaanbieder",
-        x_mgo_service_id=63,
-    )
-    mock_dva_target: DvaTarget = DvaTarget.from_dva_target_url(
-        header="https://example.com/resource"
-    )
-
-    mocker.patch.object(DvaTarget, "from_dva_target_url", return_value=mock_dva_target)
-    mock_verifier_verify = mocker.patch.object(
-        mock_verifier, "verify", mocker.AsyncMock(return_value=None)
-    )
-
-    await forwarding_service.verify_dva_target(
-        dva_target_verifier=mock_verifier, headers=mock_headers
-    )
-    mock_verifier_verify.assert_awaited_once_with(dva_target=mock_dva_target)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "exception",
-    [InvalidTargetUrlSignature(errors=["Some error"]), MissingTargetUrlSignature()],
-)
-async def test_get_and_verify_dva_target_invalid_signature(
-    forwarding_service: ForwardingService, mocker: MockerFixture, exception: Exception
-) -> None:
-    mock_verifier = mocker.Mock(DvaTargetVerifier)
-    mock_headers = ProxyHeaders(
-        accept="application/fhir+json; fhirVersion=3.0",
-        dva_target=AnyHttpUrl("https://example.com/resource"),
-        x_mgo_provider_id="eenofanderezorgaanbieder",
-        x_mgo_service_id=63,
-    )
-    mock_dva_target: DvaTarget = DvaTarget.from_dva_target_url(
-        "https://example.com/resource"
-    )
-
-    mocker.patch.object(DvaTarget, "from_dva_target_url", return_value=mock_dva_target)
-    mock_verifier.verify.side_effect = exception
-
-    with pytest.raises(HTTPException) as exc_info:
-        await forwarding_service.verify_dva_target(
-            headers=mock_headers, dva_target_verifier=mock_verifier
-        )
-
-    assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "Invalid signature"
-
-
-@pytest.mark.asyncio
-async def test_get_and_verify_dva_target_disallowed_host(
-    forwarding_service: ForwardingService, mocker: MockerFixture
-) -> None:
-    mock_verifier = mocker.Mock(DvaTargetVerifier)
-    mock_headers = ProxyHeaders(
-        accept="application/fhir+json; fhirVersion=3.0",
-        dva_target=AnyHttpUrl("https://example.com/resource"),
-        x_mgo_provider_id="eenofanderezorgaanbieder",
-        x_mgo_service_id=63,
-    )
-    mock_dva_target: DvaTarget = DvaTarget.from_dva_target_url(
-        "https://example.com/resource"
-    )
-
-    mocker.patch.object(DvaTarget, "from_dva_target_url", return_value=mock_dva_target)
-    mock_verifier.verify.side_effect = DisallowedTargetHost("example.com")
-
-    with pytest.raises(HTTPException) as exc_info:
-        await forwarding_service.verify_dva_target(
-            headers=mock_headers, dva_target_verifier=mock_verifier
-        )
-
-    assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "Forbidden"
-
-
-def test_get_forward_headers(forwarding_service: ForwardingService) -> None:
-    headers = ProxyHeaders(
+    headers = ForwardingRequest(
         accept="application/fhir+json; fhirVersion=3.0",
         dva_target=AnyHttpUrl("https://example.com/resource"),
         oauth_access_token="token",
         x_mgo_provider_id="eenofanderezorgaanbieder",
         x_mgo_service_id=63,
-    )
+    )  # type: ignore
 
     result_no_correlation: dict[str, str] = forwarding_service.get_forward_headers(
         headers=headers
     )
     assert result_no_correlation == {
         "Accept": "application/fhir+json; fhirVersion=3.0",
-        "MedMij-Request-ID": result_no_correlation[
-            "MedMij-Request-ID"
+        MEDMIJ_REQUEST_ID_HEADER: result_no_correlation[
+            MEDMIJ_REQUEST_ID_HEADER
         ],  # UUID is generated dynamically
         "Authorization": "Bearer token",
     }
@@ -139,10 +56,41 @@ def test_get_forward_headers(forwarding_service: ForwardingService) -> None:
     result: dict[str, str] = forwarding_service.get_forward_headers(headers=headers)
     assert result == {
         "Accept": "application/fhir+json; fhirVersion=3.0",
-        "MedMij-Request-ID": result[
-            "MedMij-Request-ID"
+        MEDMIJ_REQUEST_ID_HEADER: result[
+            MEDMIJ_REQUEST_ID_HEADER
         ],  # UUID is generated dynamically
-        "X-Correlation-ID": "correlation_id",
+        MEDMIJ_CORRELATION_ID_HEADER: "correlation_id",
+        "Authorization": "Bearer token",
+    }
+
+
+def test_get_forward_headers_without_accept_header_and_correlation_is_successful(
+    forwarding_service: ForwardingService,
+) -> None:
+    headers = ForwardingRequest(
+        dva_target=AnyHttpUrl("https://example.com/resource"),
+        oauth_access_token="token",
+        x_mgo_provider_id="eenofanderezorgaanbieder",
+        x_mgo_service_id=63,
+    )  # type: ignore
+
+    result_no_correlation: dict[str, str] = forwarding_service.get_forward_headers(
+        headers=headers
+    )
+    assert result_no_correlation == {
+        MEDMIJ_REQUEST_ID_HEADER: result_no_correlation[
+            MEDMIJ_REQUEST_ID_HEADER
+        ],  # UUID is generated dynamically
+        "Authorization": "Bearer token",
+    }
+
+    headers.correlation_id = "correlation_id"
+    result: dict[str, str] = forwarding_service.get_forward_headers(headers=headers)
+    assert result == {
+        MEDMIJ_REQUEST_ID_HEADER: result[
+            MEDMIJ_REQUEST_ID_HEADER
+        ],  # UUID is generated dynamically
+        MEDMIJ_CORRELATION_ID_HEADER: "correlation_id",
         "Authorization": "Bearer token",
     }
 
@@ -163,15 +111,14 @@ async def test_get_resource(mocker: MockerFixture) -> None:
     mock_request = mocker.Mock(Request)
     mock_request.url.path = "/resource"
     mock_request.url.query = "param=value"
-    mock_headers = ProxyHeaders(
+    mock_headers = ForwardingRequest(
         accept="application/fhir+json; fhirVersion=3.0",
         dva_target=AnyHttpUrl("https://mock_target"),
         x_mgo_provider_id="eenofanderezorgaanbieder",
         x_mgo_service_id=63,
-    )
+    )  # type: ignore
 
     # Mock responses for methods
-    mocker.patch.object(forwarding_service, "verify_dva_target", mocker.AsyncMock())
     mock_dva_target = mocker.Mock(DvaTarget)
     mock_dva_target.target_url = "https://example.com"
     mocker.patch.object(DvaTarget, "from_dva_target_url", return_value=mock_dva_target)
@@ -185,7 +132,7 @@ async def test_get_resource(mocker: MockerFixture) -> None:
         "get_forward_headers",
         return_value={
             "Authorization": "Bearer token",
-            "MedMij-Request-ID": "medmij-request-id",
+            MEDMIJ_REQUEST_ID_HEADER: MEDMIJ_REQUEST_ID_HEADER,
         },
     )
 
@@ -206,7 +153,7 @@ async def test_get_resource(mocker: MockerFixture) -> None:
         url="https://example.com/resource?param=value",
         headers={
             "Authorization": "Bearer token",
-            "MedMij-Request-ID": "medmij-request-id",
+            MEDMIJ_REQUEST_ID_HEADER: MEDMIJ_REQUEST_ID_HEADER,
         },
     )
 
@@ -220,15 +167,15 @@ async def test_get_resource(mocker: MockerFixture) -> None:
 def test_get_forward_headers_with_empty_content(
     forwarding_service: ForwardingService,
 ) -> None:
-    # Define headers with empty content using ProxyHeaders
-    headers_with_empty_content = ProxyHeaders(
+    # Define headers with empty content using ForwardRequest
+    headers_with_empty_content = ForwardingRequest(
         accept="application/fhir+json; fhirVersion=3.0",
         dva_target=AnyHttpUrl("https://example.com/resource"),
         oauth_access_token="",
-        correlation_id="",
+        correlation_id="1",
         x_mgo_provider_id="eenofanderezorgaanbieder",
         x_mgo_service_id=63,
-    )
+    )  # type: ignore
 
     result: dict[str, str] = forwarding_service.get_forward_headers(
         headers=headers_with_empty_content
@@ -236,9 +183,10 @@ def test_get_forward_headers_with_empty_content(
 
     expected_result = {
         "Accept": "application/fhir+json; fhirVersion=3.0",
-        "MedMij-Request-ID": result[
-            "MedMij-Request-ID"
+        MEDMIJ_REQUEST_ID_HEADER: result[
+            MEDMIJ_REQUEST_ID_HEADER
         ],  # UUID is generated dynamically
+        "X-Correlation-ID": "1",
     }
 
     assert result == expected_result
@@ -355,3 +303,50 @@ def test_filter_response_headers(
     filtered_headers = forwarding_service.filter_response_headers(headers=headers_dict)
 
     assert "Transfer-Encoding" not in filtered_headers
+
+
+@pytest.mark.asyncio
+async def test_log_send_resource_request_warns_on_missing_headers(
+    mocker: MockerFixture,
+) -> None:
+    logger = mocker.Mock(Logger)
+    forwarding_service = ForwardingService(
+        circuit_breaker=mocker.Mock(),
+        async_client=mocker.Mock(),
+        logger=logger,
+        request_forwarding_log_handler=mocker.Mock(),
+    )
+    headers = ForwardingRequest(
+        dva_target="https://example.com",
+        accept=None,
+        correlation_id=None,
+        oauth_access_token=None,
+        x_mgo_provider_id=None,
+        x_mgo_service_id=None,
+    )  # type: ignore
+    request = mocker.Mock()
+    request.url.path = "/resource"
+    request.url.query = "foo=bar"
+
+    mock_dva_target = mocker.Mock(DvaTarget)
+    mock_dva_target.target_url = "https://example.com"
+    mocker.patch.object(DvaTarget, "from_dva_target_url", return_value=mock_dva_target)
+    mocker.patch.object(
+        forwarding_service,
+        "generate_forward_url",
+        return_value="https://example.com/resource?param=value",
+    )
+    mocker.patch.object(
+        forwarding_service,
+        "get_forward_headers",
+        return_value={
+            "Authorization": "Bearer token",
+            MEDMIJ_REQUEST_ID_HEADER: MEDMIJ_REQUEST_ID_HEADER,
+        },
+    )
+
+    with pytest.raises(Exception):  # or HTTPException if that's what is raised
+        await forwarding_service.get_resource(request=request, headers=headers)
+
+    assert logger.warning.call_count >= 1
+    assert "Missing required header(s)" in logger.warning.call_args[0][0]

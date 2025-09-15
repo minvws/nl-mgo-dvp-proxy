@@ -173,6 +173,10 @@ class BaseUrl(RootModel[AnyHttpUrl]):
         return str(self.root)
 
 
+class ForwardingConfig(InjectableConfig):
+    require_provider_and_service_id: bool = False
+
+
 class AppConfig(BaseModel):
     env: Environment
     logging: LoggingConfig = LoggingConfig()
@@ -191,3 +195,4 @@ class AppConfig(BaseModel):
     telemetry: TelemetryConfig | None = None
     oidc: OidcConfig
     vad_http_client: VadHttpClientConfig
+    forwarding: ForwardingConfig = ForwardingConfig()

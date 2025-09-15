@@ -11,7 +11,7 @@ from pytest_mock import MockerFixture
 
 from app.circuitbreaker.models import CircuitOpenException
 from app.circuitbreaker.services import CircuitBreakerService
-from app.forwarding.schemas import ProxyHeaders
+from app.forwarding.schemas import ForwardingRequest
 from app.forwarding.services import ForwardingService, RequestForwardingLogHandler
 from app.forwarding.signing.services import DvaTargetVerifier
 from app.medmij_logging.schemas import (
@@ -79,13 +79,13 @@ def test_request(mocker: MockerFixture) -> Request:
 
 
 @pytest.fixture
-def test_headers() -> ProxyHeaders:
-    return ProxyHeaders(
+def test_headers() -> ForwardingRequest:
+    return ForwardingRequest(
         dva_target=AnyHttpUrl("https://mock_target"),
         x_mgo_provider_id="eenofanderezorgaanbieder",
         x_mgo_service_id=63,
         accept="application/fhir+json; fhirVersion=3.0",
-    )
+    )  # type: ignore
 
 
 @pytest.fixture
@@ -135,7 +135,7 @@ async def test_it_logs_resource_request_error_with_provided_error_context(
     medmij_logger_spy: MockerFixture,
     mocker: MockerFixture,
     test_request: Request,
-    test_headers: ProxyHeaders,
+    test_headers: ForwardingRequest,
     response_status_code: int,
     www_authenticate_header: str,
     expected_error: str,
@@ -198,7 +198,7 @@ async def test_it_logs_resource_request_error_with_default_error_context(
     medmij_logger_spy: MockerFixture,
     mocker: MockerFixture,
     test_request: Request,
-    test_headers: ProxyHeaders,
+    test_headers: ForwardingRequest,
     response_status_code: int,
     www_authenticate_header: str | None,
     expected_error: str,
@@ -241,7 +241,7 @@ async def test_it_logs_resource_error_response_on_request_timeout(
     medmij_logger_spy: MockerFixture,
     mocker: MockerFixture,
     test_request: Request,
-    test_headers: ProxyHeaders,
+    test_headers: ForwardingRequest,
     exception_type: type[Exception],
 ) -> None:
     circuit_breaker_mock = mocker.Mock(CircuitBreakerService)
@@ -275,7 +275,7 @@ async def test_it_logs_resource_error_response_on_other_error_responses(
     medmij_logger_spy: MockerFixture,
     mocker: MockerFixture,
     test_request: Request,
-    test_headers: ProxyHeaders,
+    test_headers: ForwardingRequest,
     response_status_code: int,
 ) -> None:
     circuit_breaker_mock = mocker.Mock(CircuitBreakerService)

@@ -1,18 +1,29 @@
 - ### NEXT FUTURE RELEASE
 
-- ### [0.13.0] 2025-04-30
+- ### [0.15.0]
+
+    - Add `forwarding` section to config
+        - require_provider_and_service_id
+            - boolean
+            - default: false
+
+
+- ### [0.14.0]
     - No changes required
 
-- ### [0.12.0] 2025-03-21
+- ### [0.13.0]
     - No changes required
 
-- ### [0.11.0] 2025-02-28
+- ### [0.12.0]
     - No changes required
 
-- ### [0.10.0] 2025-02-07
+- ### [0.11.0]
     - No changes required
 
-- ### [0.9.0] 2025-01-31
+- ### [0.10.0]
+    - No changes required
+
+- ### [0.9.0]
     (added in 0.9.0 but was not added in the changelog back then)
 
     ### Added:
@@ -25,7 +36,7 @@
     - `oidc`
         - `client_assertion_jwt_key_path`
 
-- ### [0.8.0] 2025-01-17
+- ### [0.8.0]
     ### Added:
     - `oidc` section
         - client_id
@@ -52,7 +63,7 @@
             - value: empty
 
 
-- ### [0.7.0] 2024-12-13
+- ### [0.7.0]
 
     #### Added:
     - `telemetry` section
@@ -64,7 +75,7 @@
         - string - The URL of the gRPC server that will receive the telemetry data.
         - example: http://jaeger:4317
 
-- ### [0.6.0] 2024-10-04
+- ### [0.6.0]
 
     ### Update
     - `oauth.tls` section should be moved/rename to `oauth_tls` section
@@ -74,7 +85,7 @@
     - `logging.logger_name`: "dvp_proxy"
         - The name of the logger used for application logs
 
-- ### [0.5.0] 2024-09-18
+- ### [0.5.0]
 
     ### Added:
     - `oauth` section
@@ -134,11 +145,11 @@
     - The path to the SSL CA certificate file, required if `redis.ssl` is True
 
 
-- ### [0.4.1] 2024-07-25
+- ### [0.4.1]
 
   No changes required
 
-- ### [0.4.0] 2024-07-23
+- ### [0.4.0]
 
     #### Added:
 
@@ -166,11 +177,11 @@
     - `signature_validation.signature_name`
       - This value has been hardcoded as it is very unlikely that it will ever change.
 
-- ### [0.3.1] - 2024-06-20
+- ### [0.3.1]
 
   No changes required
 
-- ### [0.3.0] - 2024-06-19
+- ### [0.3.0]
     #### Add:
 
     [app.conf](app.conf)
@@ -186,15 +197,15 @@
     - `mock_url`
       - Removed because remote DVA's (and the mock DVA) are now targeted through the `{target_header_name}` header, and no longer are hardcoded
 
-- ### [0.2.1] - 2024-06-06
+- ### [0.2.1]
 
   No changes required
 
-- ### [0.2.0] - 2024-06-05
+- ### [0.2.0]
 
   No changes required
 
-- ### [0.1.0] - 2024-05-27
+- ### [0.1.0]
 
     #### Add:
 
@@ -209,7 +220,7 @@
 
     - Change version from 0.0.4 to 0.1.0 to start using semver properly
 
-- ### [0.0.3] - PRE-RELEASE
+- ### [0.0.3]
 
     #### Add:
 

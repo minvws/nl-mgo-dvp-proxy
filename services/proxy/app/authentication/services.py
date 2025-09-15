@@ -7,7 +7,11 @@ from urllib import parse
 import inject
 from cryptography.fernet import Fernet, InvalidToken
 
-from app.forwarding.constants import TARGET_URL_SIGNATURE_QUERY_PARAM
+from app.forwarding.constants import (
+    MEDMIJ_CORRELATION_ID_HEADER,
+    MEDMIJ_REQUEST_ID_HEADER,
+    TARGET_URL_SIGNATURE_QUERY_PARAM,
+)
 from app.medmij_logging.enums import GrantType
 from app.medmij_logging.factories import LogMessageFactory
 from app.medmij_logging.services import MedMijLogger, ServerIdentifier
@@ -118,10 +122,10 @@ class MedMijAuthRequestUrlDirector:
 
     def add_medmij_id(self) -> None:
         medmij_id: str = str(uuid.uuid4())
-        self._builder.add_param("MedMij-Request-ID", medmij_id)
+        self._builder.add_param(MEDMIJ_REQUEST_ID_HEADER, medmij_id)
 
     def add_correlation_id(self, correlation_id: str) -> None:
-        self._builder.add_param("X-Correlation-ID", correlation_id)
+        self._builder.add_param(MEDMIJ_CORRELATION_ID_HEADER, correlation_id)
 
     def add_state(
         self, correlation_id: str, token_endpoint_url: str, client_target_url: str

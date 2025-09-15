@@ -88,3 +88,6 @@ url=https://vad.example
 ; client_cert=
 ; client_key=
 ; ca_cert=
+
+[forwarding]
+require_provider_and_service_id=false

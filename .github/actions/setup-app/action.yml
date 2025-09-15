@@ -14,7 +14,7 @@ runs:
 
         - name: Install poetry
           shell: bash
-          run: pip3 install poetry==1.8.*
+          run: pip3 install poetry
 
         - uses: actions/setup-python@v5
           with:

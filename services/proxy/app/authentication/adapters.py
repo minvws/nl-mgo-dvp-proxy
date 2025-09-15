@@ -2,6 +2,10 @@ from typing import Any, Dict
 
 import httpx
 import inject
+from app.forwarding.constants import (
+    MEDMIJ_REQUEST_ID_HEADER,
+    MEDMIJ_CORRELATION_ID_HEADER,
+)
 
 from .exceptions import AuthorizationHttpException
 from .interfaces import OauthTokenAdapter
@@ -28,8 +32,8 @@ class MedMijOauthTokenAdapter(OauthTokenAdapter):
         medmij_request_id: str,
     ) -> Dict[str, Any]:
         headers: dict[str, str] = {
-            "X-Correlation-ID": correlation_id,
-            "MedMij-Request-ID": medmij_request_id,
+            MEDMIJ_CORRELATION_ID_HEADER: correlation_id,
+            MEDMIJ_REQUEST_ID_HEADER: medmij_request_id,
             "Content-Type": "application/x-www-form-urlencoded",
         }
 

@@ -1,6 +1,6 @@
-FROM alpine:3.8 as BASE
+FROM alpine:3.22
 
-RUN apk update && apk add -y openssl
+RUN apk update && apk add --no-cache openssl
 
 RUN mkdir /certs
 

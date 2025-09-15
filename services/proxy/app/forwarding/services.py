@@ -10,9 +10,16 @@ from opentelemetry.propagate import inject as op_inject
 
 from app.circuitbreaker.models import CircuitOpenException
 from app.circuitbreaker.services import CircuitBreakerService
-from app.forwarding.constants import FORWARD_URL_RESPONSE_HEADER
+from app.forwarding.constants import (
+    FORWARD_URL_RESPONSE_HEADER,
+    MEDMIJ_CORRELATION_ID_HEADER,
+    MEDMIJ_REQUEST_ID_HEADER,
+)
+from app.forwarding.constants import (
+    MGO_HEALTHCARE_PROVIDER_ID_HEADER,
+    MGO_DATASERVICE_ID_HEADER,
+)
 from app.forwarding.models import DvaTarget
-from app.forwarding.schemas import ProxyHeaders
 from app.medmij_logging.constants import WWW_AUTHENTICATE_HEADER
 from app.medmij_logging.factories import LogMessageFactory
 from app.medmij_logging.services import (
@@ -21,13 +28,7 @@ from app.medmij_logging.services import (
     WWWAuthenticateParser,
 )
 
-from .schemas import ProxyHeaders
-from .signing.exceptions import (
-    DisallowedTargetHost,
-    InvalidTargetUrlSignature,
-    MissingTargetUrlSignature,
-)
-from .signing.services import DvaTargetVerifier
+from .schemas import ForwardingRequest
 
 
 class RequestForwardingLogHandler:
@@ -49,8 +50,8 @@ class RequestForwardingLogHandler:
         request_id: str,
         forward_url: str,
         request_method: str,
-        service_id: int | None,
-        provider_id: str | None,
+        service_id: int,
+        provider_id: str,
     ) -> None:
         resource_request_log_message = (
             self._log_message_factory.create_send_resource_request_message(
@@ -207,34 +208,16 @@ class ForwardingService:
             request_forwarding_log_handler
         )
 
-    @inject.autoparams()
-    async def verify_dva_target(
-        self,
-        headers: ProxyHeaders,
-        dva_target_verifier: DvaTargetVerifier,
-    ) -> None:
-        dva_target: DvaTarget = DvaTarget.from_dva_target_url(
-            header=str(headers.dva_target)
-        )
-
-        try:
-            await dva_target_verifier.verify(dva_target=dva_target)
-        except (
-            InvalidTargetUrlSignature,
-            MissingTargetUrlSignature,
-        ):
-            raise HTTPException(403, "Invalid signature")
-        except DisallowedTargetHost:
-            raise HTTPException(403, "Forbidden")
-
-    def get_forward_headers(self, headers: ProxyHeaders) -> dict[str, str]:
+    def get_forward_headers(self, headers: ForwardingRequest) -> dict[str, str]:
         forward_headers: dict[str, str] = {
-            "MedMij-Request-ID": str(uuid.uuid4()),
-            "Accept": headers.accept,
+            MEDMIJ_REQUEST_ID_HEADER: str(uuid.uuid4()),
         }
 
+        if headers.accept is not None:
+            forward_headers["Accept"] = headers.accept
+
         if headers.correlation_id:
-            forward_headers["X-Correlation-ID"] = headers.correlation_id
+            forward_headers[MEDMIJ_CORRELATION_ID_HEADER] = headers.correlation_id
 
         if headers.oauth_access_token:
             forward_headers["Authorization"] = f"Bearer {headers.oauth_access_token}"
@@ -284,9 +267,9 @@ class ForwardingService:
             if key.lower() not in excluded_headers
         }
 
-    async def get_resource(self, request: Request, headers: ProxyHeaders) -> Response:
-        await self.verify_dva_target(headers=headers)
-
+    async def get_resource(
+        self, request: Request, headers: ForwardingRequest
+    ) -> Response:
         dva_target: DvaTarget = DvaTarget.from_dva_target_url(str(headers.dva_target))
 
         # Get target_url which is already stripped of the signature
@@ -303,14 +286,12 @@ class ForwardingService:
             headers.correlation_id if headers.correlation_id else uuid.uuid4()
         )
 
-        self._request_forwarding_log_handler.handle_send_resource_request_log(
-            session_id=uuid.uuid4().hex,
-            request_id=forward_headers["MedMij-Request-ID"],
+        self.__log_send_resource_request(
+            forward_headers=forward_headers,
             trace_id=trace_id,
             forward_url=forward_url,
-            request_method=request.method,
-            provider_id=headers.x_mgo_provider_id,
-            service_id=headers.x_mgo_service_id,
+            request=request,
+            headers=headers,
         )
 
         try:
@@ -327,7 +308,7 @@ class ForwardingService:
             )
 
             self._request_forwarding_log_handler.handle_resource_response_log(
-                forward_headers["MedMij-Request-ID"],
+                forward_headers[MEDMIJ_REQUEST_ID_HEADER],
                 trace_id=trace_id,
                 session_id=uuid.uuid4().hex,  # session id is generated as the DVP Proxy does not keep sessions
                 response_status_code=408,
@@ -341,7 +322,7 @@ class ForwardingService:
             )
 
         self._request_forwarding_log_handler.handle_resource_response_log(
-            httpx_response.headers.get("MedMij-Request-ID", ""),
+            httpx_response.headers.get(MEDMIJ_REQUEST_ID_HEADER, ""),
             trace_id=trace_id,
             session_id=uuid.uuid4().hex,  # session id is generated as the DVP Proxy does not keep sessions
             response_status_code=httpx_response.status_code,
@@ -363,3 +344,40 @@ class ForwardingService:
             status_code=httpx_response.status_code,
             headers=response_headers,
         )
+
+    def __log_send_resource_request(
+        self,
+        forward_headers: dict[str, str],
+        trace_id: str,
+        forward_url: str,
+        request: Request,
+        headers: ForwardingRequest,
+    ) -> None:
+        missing: list[str] = self.validate_feature_flag_headers(headers)
+        if missing:
+            self.logger.warning(
+                f"Missing required header(s): {', '.join(missing)}. "
+                "This may cause issues with logging and tracing."
+            )
+            return
+
+        assert headers.x_mgo_provider_id is not None
+        assert headers.x_mgo_service_id is not None
+
+        self._request_forwarding_log_handler.handle_send_resource_request_log(
+            session_id=uuid.uuid4().hex,
+            request_id=forward_headers[MEDMIJ_REQUEST_ID_HEADER],
+            trace_id=trace_id,
+            forward_url=forward_url,
+            request_method=request.method,
+            provider_id=headers.x_mgo_provider_id,
+            service_id=headers.x_mgo_service_id,
+        )
+
+    def validate_feature_flag_headers(self, headers: ForwardingRequest) -> list[str]:
+        missing: list[str] = []
+        if not headers.x_mgo_provider_id:
+            missing.append(MGO_HEALTHCARE_PROVIDER_ID_HEADER)
+        if not headers.x_mgo_service_id:
+            missing.append(MGO_DATASERVICE_ID_HEADER)
+        return missing

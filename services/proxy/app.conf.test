@@ -38,3 +38,6 @@ client_assertion_jwt_pub_key_path=secrets/client_assertion_jwt.pem
 
 [vad_http_client]
 url=http://localhost:8006
+
+[forwarding]
+require_provider_and_service_id=false

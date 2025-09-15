@@ -1,40 +1,73 @@
-import inject
 import pytest
 from fastapi.testclient import TestClient
-from httpx import ConnectTimeout, HTTPStatusError, Request, Response
+from httpx import ConnectTimeout, Request, Response
 from inject import Binder
 from pytest_mock import MockerFixture
 
 from app.authentication.adapters import MedMijOauthTokenAdapter, MockedOauthTokenAdapter
 from app.authentication.exceptions import AuthorizationHttpException
-from app.authentication.models import AccessTokenDTO
+from app.authentication.models import AccessTokenDTO, AsyncOAuthClient
 from tests.utils import configure_bindings
+
+ACCESS_TOKEN: str = "access-token"
+TOKEN_TYPE: str = "Bearer"
+EXPIRES_IN: int = 3600
+REFRESH_TOKEN: str = "refresh-token"
+SCOPE: str = "read write"
+
+
+@pytest.fixture
+def make_token_response() -> dict[str, str | int]:
+    return {
+        "access_token": ACCESS_TOKEN,
+        "token_type": TOKEN_TYPE,
+        "expires_in": EXPIRES_IN,
+        "refresh_token": REFRESH_TOKEN,
+        "scope": SCOPE,
+    }
+
+
+@pytest.fixture
+def mock_response(
+    mocker: MockerFixture, make_token_response: dict[str, str | int]
+) -> Response:
+    mock_response: Response = mocker.Mock()
+    mock_response.json.return_value = make_token_response  # type: ignore[attr-defined]
+
+    return mock_response
+
+
+@pytest.fixture
+def mock_client(mocker: MockerFixture) -> AsyncOAuthClient:
+    mock_client: AsyncOAuthClient = mocker.AsyncMock(spec=AsyncOAuthClient)
+    return mock_client
+
+
+@pytest.fixture
+def token_adapter_mock(
+    mock_client: AsyncOAuthClient,
+    mock_response: Response,
+    mocker: MockerFixture,
+) -> MedMijOauthTokenAdapter:
+    mock_client.post.return_value = mock_response  # type: ignore[attr-defined]
+
+    adapter: MedMijOauthTokenAdapter = MedMijOauthTokenAdapter(
+        client_id="id", redirect_uri="uri", client=mock_client
+    )
+    return adapter
 
 
 class TestMedMijOauthTokenAdapter:
     @pytest.mark.asyncio
-    async def test_retrieve_access_token(
-        self, test_client: TestClient, mocker: MockerFixture
+    async def test_get_access_token(
+        self,
+        mock_response: Response,
+        token_adapter_mock: MedMijOauthTokenAdapter,
+        mocker: MockerFixture,
     ) -> None:
-        self.__configure_adapter()
-        adapter: MedMijOauthTokenAdapter = inject.instance(MedMijOauthTokenAdapter)
-
-        mock_response: Response = mocker.Mock()
-        mocker.patch.object(
-            mock_response,
-            "json",
-            return_value={
-                "access_token": "test_access_token",
-                "token_type": "Bearer",
-                "expires_in": 3600,
-                "refresh_token": "test_refresh_token",
-                "scope": "test_scope",
-            },
-        )
-
         mocker.patch("httpx.AsyncClient.post", return_value=mock_response)
 
-        access_token: AccessTokenDTO = await adapter.get_access_token(
+        access_token: AccessTokenDTO = await token_adapter_mock.get_access_token(
             token_server_uri="http://localhost/token",
             code="test_code",
             correlation_id="test_correlation_id",
@@ -42,35 +75,21 @@ class TestMedMijOauthTokenAdapter:
         )
 
         assert isinstance(access_token, AccessTokenDTO)
-        assert access_token.access_token == "test_access_token"
-        assert access_token.token_type == "Bearer"
-        assert access_token.expires_in == 3600
-        assert access_token.refresh_token == "test_refresh_token"
-        assert access_token.scope == "test_scope"
+        assert access_token.access_token == ACCESS_TOKEN
+        assert access_token.token_type == TOKEN_TYPE
+        assert access_token.expires_in == EXPIRES_IN
+        assert access_token.refresh_token == REFRESH_TOKEN
+        assert access_token.scope == SCOPE
 
     @pytest.mark.asyncio
     async def test_refresh_access_token(
-        self, test_client: TestClient, mocker: MockerFixture
+        self,
+        token_adapter_mock: MedMijOauthTokenAdapter,
+        mocker: MockerFixture,
     ) -> None:
-        self.__configure_adapter()
-        adapter: MedMijOauthTokenAdapter = inject.instance(MedMijOauthTokenAdapter)
-
-        mock_response: Response = mocker.Mock()
-        mocker.patch.object(
-            mock_response,
-            "json",
-            return_value={
-                "access_token": "test_access_token",
-                "token_type": "Bearer",
-                "expires_in": 3600,
-                "refresh_token": "test_refresh_token",
-                "scope": "test_scope",
-            },
-        )
-
         mocker.patch("httpx.AsyncClient.post", return_value=mock_response)
 
-        access_token: AccessTokenDTO = await adapter.refresh_access_token(
+        access_token: AccessTokenDTO = await token_adapter_mock.refresh_access_token(
             token_server_uri="http://localhost/token",
             refresh_token="test_refresh_token",
             correlation_id="test_correlation_id",
@@ -78,19 +97,21 @@ class TestMedMijOauthTokenAdapter:
         )
 
         assert isinstance(access_token, AccessTokenDTO)
-        assert access_token.access_token == "test_access_token"
-        assert access_token.token_type == "Bearer"
-        assert access_token.expires_in == 3600
-        assert access_token.refresh_token == "test_refresh_token"
-        assert access_token.scope == "test_scope"
+        assert access_token.access_token == ACCESS_TOKEN
+        assert access_token.token_type == TOKEN_TYPE
+        assert access_token.expires_in == EXPIRES_IN
+        assert access_token.refresh_token == REFRESH_TOKEN
+        assert access_token.scope == SCOPE
 
     @pytest.mark.asyncio
-    async def test_retrieve_access_token_fails_with_a_400_error(
-        self, test_client: TestClient, mocker: MockerFixture
+    async def test_get_access_token_fails_with_a_400_error(
+        self,
+        test_client: TestClient,
+        mock_response: Response,
+        mock_client: AsyncOAuthClient,
+        token_adapter_mock: MedMijOauthTokenAdapter,
+        mocker: MockerFixture,
     ) -> None:
-        self.__configure_adapter()
-        adapter: MedMijOauthTokenAdapter = inject.instance(MedMijOauthTokenAdapter)
-
         mock_response = Response(
             status_code=400,
             request=Request("POST", "https://example.com"),
@@ -100,10 +121,10 @@ class TestMedMijOauthTokenAdapter:
             },
         )
 
-        mocker.patch("httpx.AsyncClient.post", return_value=mock_response)
+        mock_client.post.return_value = mock_response  # type: ignore[attr-defined]
 
         with pytest.raises(AuthorizationHttpException):
-            await adapter.get_access_token(
+            await token_adapter_mock.get_access_token(
                 token_server_uri="http://localhost/token",
                 code="test_code",
                 correlation_id="test_correlation_id",
@@ -111,28 +132,22 @@ class TestMedMijOauthTokenAdapter:
             )
 
     @pytest.mark.asyncio
-    async def test_retrieve_access_token_fails_with_a_405_error(
-        self, test_client: TestClient, mocker: MockerFixture
+    async def test_get_access_token_fails_with_a_405_error(
+        self,
+        mock_response: Response,
+        mock_client: AsyncOAuthClient,
+        token_adapter_mock: MedMijOauthTokenAdapter,
+        mocker: MockerFixture,
     ) -> None:
-        self.__configure_adapter()
-        adapter: MedMijOauthTokenAdapter = inject.instance(MedMijOauthTokenAdapter)
-
         mock_response = Response(
             status_code=405,
             request=Request("POST", "https://example.com"),
             content="Client error '405 Method Not Allowed' for url 'http://localhost:8001/token?grant_type=authorization_code&code=5a21f31d-4a00-4e47-aa97-501d6b296572&client_id=test.mgo.medmij%40denhaag&redirect_uri=http%3A%2F%2Flocalhost%3A8001%2Fauth%2Fcallback'\\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/405",
         )
-        mocker.patch(
-            "httpx.AsyncClient.post",
-            side_effect=HTTPStatusError(
-                "HTTP error occurred",
-                request=mock_response.request,
-                response=mock_response,
-            ),
-        )
+        mock_client.post.return_value = mock_response  # type: ignore[attr-defined]
 
         with pytest.raises(AuthorizationHttpException) as e:
-            await adapter.get_access_token(
+            await token_adapter_mock.get_access_token(
                 token_server_uri="http://localhost/token",
                 code="test_code",
                 correlation_id="test_correlation_id",
@@ -141,24 +156,53 @@ class TestMedMijOauthTokenAdapter:
         assert e.value.status_code == 405
 
     @pytest.mark.asyncio
-    async def test_retrieve_access_token_fails_with_a_connect_timout(
-        self, test_client: TestClient, mocker: MockerFixture
+    async def test_get_access_token_fails_with_a_connect_timeout(
+        self,
+        mock_client: AsyncOAuthClient,
+        token_adapter_mock: MedMijOauthTokenAdapter,
+        mocker: MockerFixture,
     ) -> None:
-        self.__configure_adapter()
-        adapter: MedMijOauthTokenAdapter = inject.instance(MedMijOauthTokenAdapter)
-
-        mocker.patch(
-            "httpx.AsyncClient.post", side_effect=ConnectTimeout("Connection timed out")
-        )
+        mock_client.post.side_effect = ConnectTimeout("Connection timed out")  # type: ignore[attr-defined]
 
         with pytest.raises(AuthorizationHttpException) as e:
-            await adapter.get_access_token(
+            await token_adapter_mock.get_access_token(
                 token_server_uri="http://localhost/token",
                 code="test_code",
                 correlation_id="test_correlation_id",
                 medmij_request_id="test_medmij_request_id",
             )
         assert e.value.status_code == 500
+
+    @pytest.mark.asyncio
+    async def test_get_access_token_post_uses_data_not_params_is_successful(
+        self,
+        token_adapter_mock: MedMijOauthTokenAdapter,
+        mock_client: AsyncOAuthClient,
+    ) -> None:
+        await token_adapter_mock.get_access_token(
+            token_server_uri="https://example.com",
+            code="code",
+            correlation_id="cid",
+            medmij_request_id="mid",
+        )
+
+        mock_client.post.assert_called_once()  # type: ignore[attr-defined]
+
+        called_kwargs = mock_client.post.call_args.kwargs  # type: ignore[attr-defined]
+
+        assert "data" in called_kwargs
+        assert "params" not in called_kwargs
+        assert (
+            called_kwargs["headers"]["Content-Type"]
+            == "application/x-www-form-urlencoded"
+        )
+
+        assert called_kwargs["data"] == {
+            "grant_type": "authorization_code",
+            "code": "code",
+            "client_id": "id",
+            "redirect_uri": "uri",
+        }
 
     def __configure_adapter(self) -> None:
         adapter: MedMijOauthTokenAdapter = MedMijOauthTokenAdapter(
