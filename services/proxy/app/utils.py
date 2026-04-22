@@ -2,8 +2,10 @@ import os
 from typing import Any
 
 import inject
-from fastapi import Depends
+from fastapi import APIRouter, Depends, FastAPI
 from inject import Injectable
+from mgo_healthchecker.routers import init_router
+from mgo_healthchecker.utils import HealthCheckerCollection
 
 
 def root_path(*args: str) -> str:
@@ -35,3 +37,17 @@ def resolve_instance(cls: Any) -> Any:
         return inject.instance(cls)
 
     return Depends(get_instance)
+
+
+def init_healthcheck_router(app: FastAPI) -> APIRouter:  # pragma: no cover
+    """
+    Creates the health check router from the `mgo_healthchecker` package.
+    The required `HealthCheckerCollection` instance will be resolved using `inject`.
+    """
+
+    def get_health_checker_collection() -> HealthCheckerCollection:
+        return inject.instance(HealthCheckerCollection)
+
+    router: APIRouter = init_router(app, get_health_checker_collection)
+
+    return router

@@ -28,13 +28,16 @@ spelling-check: ## Check spelling mistakes
 spelling-fix: ## Fix spelling mistakes
 	$(RUN_PREFIX) codespell . .codespellignore --write-changes --interactive=3
 
+module-dependencies-check: ## Check cross-dependencies between modules  
+	$(RUN_PREFIX) tach check -exact
+
 test: ## Runs automated tests with code coverage
 	$(RUN_PREFIX) pytest --cov --cov-fail-under=100 --cov-branch
 
 test-cov-xml: ## Runs automated tests with code coverage and exports a code coverage report to an XML file
 	$(RUN_PREFIX) pytest --cov --cov-fail-under=100 --cov-branch --cov-report=xml
 
-check: lint format-diff type-check spelling-check test ## Runs all checks
+check: lint format-diff type-check spelling-check module-dependencies-check test ## Runs all checks
 fix: lint-fix format spelling-fix ## Runs all fixers
 
 help: ## Display available commands

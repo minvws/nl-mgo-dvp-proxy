@@ -1,5 +1,4 @@
 import ssl
-
 from abc import ABC, abstractmethod
 from logging import Logger
 
@@ -7,7 +6,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from inject import autoparams
 
 from .exceptions import CouldNotDecryptPayload
-from .repositories import KeyStoreRepository
+from .repositories import SecretRepository
 
 
 class Encrypter(ABC):  # pragma: no cover
@@ -24,18 +23,18 @@ class FernetEncrypter(Encrypter):
     KEY_STORE_ID: str = "fernet_secret"
 
     @autoparams()
-    def __init__(self, key_store_repository: KeyStoreRepository, logger: Logger):
-        self.__key_store_repository = key_store_repository
+    def __init__(self, secret_repository: SecretRepository, logger: Logger):
+        self.__secret_repository = secret_repository
         self.__logger = logger
 
     def encrypt(self, payload: str) -> str:
-        secret = self.__key_store_repository.get_key_store(self.KEY_STORE_ID)[0]
+        secret = self.__secret_repository.get_first_key_from_store(self.KEY_STORE_ID)
         fernet = Fernet(secret)
 
         return fernet.encrypt(payload.encode()).decode()
 
     def decrypt(self, ciphertext: str) -> str:
-        secrets = self.__key_store_repository.get_key_store(self.KEY_STORE_ID)
+        secrets = self.__secret_repository.get_key_store(self.KEY_STORE_ID)
 
         for secret in secrets:
             try:

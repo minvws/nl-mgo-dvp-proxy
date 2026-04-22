@@ -44,6 +44,7 @@ class VadHttpClient:
         client_id: str,
         client_assertion_type: str | None = None,
         client_assertion: str | None = None,
+        client_secret: str | None = None,
     ) -> VadTokenResponse:
         body = {
             "grant_type": grant_type,
@@ -52,6 +53,8 @@ class VadHttpClient:
             "code_verifier": code_verifier,
             "client_id": client_id,
         }
+        if client_secret:
+            body["client_secret"] = client_secret
         if client_assertion:
             body["client_assertion"] = client_assertion
         if client_assertion_type:

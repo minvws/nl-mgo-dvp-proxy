@@ -9,12 +9,10 @@ from pytest_mock import MockerFixture
 
 from app.circuitbreaker.services import CircuitBreakerService
 from app.forwarding.constants import (
+    FORWARD_URL_RESPONSE_HEADER,
     MEDMIJ_CORRELATION_ID_HEADER,
     MEDMIJ_REQUEST_ID_HEADER,
-    FORWARD_URL_RESPONSE_HEADER,
 )
-
-from app.forwarding.models import DvaTarget
 from app.forwarding.schemas import ForwardingRequest
 from app.forwarding.services import ForwardingService
 
@@ -118,10 +116,6 @@ async def test_get_resource(mocker: MockerFixture) -> None:
         x_mgo_service_id=63,
     )  # type: ignore
 
-    # Mock responses for methods
-    mock_dva_target = mocker.Mock(DvaTarget)
-    mock_dva_target.target_url = "https://example.com"
-    mocker.patch.object(DvaTarget, "from_dva_target_url", return_value=mock_dva_target)
     mocker.patch.object(
         forwarding_service,
         "generate_forward_url",
@@ -144,7 +138,7 @@ async def test_get_resource(mocker: MockerFixture) -> None:
     )
 
     result: Response = await forwarding_service.get_resource(
-        request=mock_request, headers=mock_headers
+        path=mock_request.url.path, request=mock_request, headers=mock_headers
     )
 
     mock_circuit_breaker_call.assert_awaited_once_with(
@@ -237,6 +231,12 @@ def test_get_forward_headers_with_empty_content(
             "include=value1&include=value2",
             "https://example.com/48/fhir/patient?include=value1&include=value2",
         ),
+        (
+            "https://dva.interoplab.eu/ontwikkel/verplicht/fhir",
+            "/fhir/MedicationRequest",
+            "category=http://snomed.info/sct|16076005&_include=MedicationRequest:medication",
+            "https://dva.interoplab.eu/ontwikkel/verplicht/fhir/MedicationRequest?category=http://snomed.info/sct|16076005&_include=MedicationRequest:medication",
+        ),
     ],
     ids=[
         "Generate Forward-URL with target_url, path, and query_params",
@@ -246,6 +246,7 @@ def test_get_forward_headers_with_empty_content(
         "Generate Forward-URL without query_params",
         "Generate Forward-URL with target_url without domain extension",
         "Generate Forward-URL with two query arguments with same name but different values",
+        "Generate Forward-URL without duplicating fhir segment when target already ends in /fhir",
     ],
 )
 def test_generate_forward_url(
@@ -328,9 +329,6 @@ async def test_log_send_resource_request_warns_on_missing_headers(
     request.url.path = "/resource"
     request.url.query = "foo=bar"
 
-    mock_dva_target = mocker.Mock(DvaTarget)
-    mock_dva_target.target_url = "https://example.com"
-    mocker.patch.object(DvaTarget, "from_dva_target_url", return_value=mock_dva_target)
     mocker.patch.object(
         forwarding_service,
         "generate_forward_url",
@@ -346,7 +344,9 @@ async def test_log_send_resource_request_warns_on_missing_headers(
     )
 
     with pytest.raises(Exception):  # or HTTPException if that's what is raised
-        await forwarding_service.get_resource(request=request, headers=headers)
+        await forwarding_service.get_resource(
+            path=request.url.path, request=request, headers=headers
+        )
 
     assert logger.warning.call_count >= 1
     assert "Missing required header(s)" in logger.warning.call_args[0][0]

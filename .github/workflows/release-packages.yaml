@@ -15,8 +15,11 @@ jobs:
     name: Create source package
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
       - name: Run source package action
-        uses: minvws/nl-irealisatie-generic-pipelines/.github/actions/src-package@main
+        uses: minvws/action-generic-build-package@v1
         with:
           include_paths: "app static tools app.conf.example HOSTING_CHANGELOG.md"
           package_file_name: ${{ env.PACKAGE_FILE_NAME }}
@@ -26,8 +29,14 @@ jobs:
     name: Create venv package
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Configure Git to use GitHub token for private dependencies
+        run: git config --global url.https://${{ secrets.REPO_READ_ONLY_TOKEN }}@github.com.insteadOf ssh://git@github.com
+
       - name: Run venv package action
-        uses: minvws/nl-irealisatie-generic-pipelines/.github/actions/python-venv-package@main
+        uses: minvws/action-python-venv-package@v1
         with:
           python_version: ${{ env.PYTHON_VERSION }}
           package_file_name: ${{ env.PACKAGE_FILE_NAME }}

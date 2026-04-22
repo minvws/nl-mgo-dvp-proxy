@@ -1,0 +1,71 @@
+interfaces = []
+exclude = [
+    "**/*__pycache__",
+    "**/*egg-info",
+    "docs",
+    "tests",
+    ".venv",
+    "secrets",
+    "static",
+    "docker",
+    "certs",
+]
+source_roots = [
+    ".",
+]
+
+[[modules ]]
+path = "app.authentication"
+depends_on = ["app.security", "app.forwarding", "app.medmij_logging"]
+
+[[modules ]]
+path = "app.telemetry"
+depends_on = []
+
+[[modules ]]
+path = "app.oidc"
+depends_on = [ "app.security"]
+
+[[modules ]]
+path = "app.metrics"
+depends_on = []
+
+[[modules ]]
+path = "app.circuitbreaker"
+depends_on = []
+
+[[modules ]]
+path = "app.http_client"
+depends_on = ["app.security"]
+
+[[modules ]]
+path = "app.main"
+depends_on = [ "app.forwarding", "app.authentication", "app.oidc", "app.telemetry", "app.version", "app.exception_handlers", "app.docs"]
+
+[[modules ]]
+path = "app.medmij_logging"
+depends_on = []
+
+[[modules ]]
+path = "app.security"
+depends_on = []
+
+[[modules ]]
+path = "app.forwarding"
+depends_on = ["app.metrics", "app.circuitbreaker", "app.security", "app.medmij_logging"]
+
+[[modules ]]
+path = "app.version"
+depends_on = []
+
+[[modules ]]
+path = "app.seeders"
+depends_on = ["app.oidc", "app.security"]
+
+[[modules ]]
+path = "app.exception_handlers"
+depends_on = ["app.authentication"]
+
+[[modules ]]
+path = "app.docs"
+depends_on = []

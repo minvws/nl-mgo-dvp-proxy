@@ -1,36 +1,25 @@
-from fastapi import APIRouter, Request, Response, Depends
-from starlette.status import HTTP_422_UNPROCESSABLE_ENTITY
-from app.forwarding.schemas import ForwardingRequest
-from app.forwarding.services import ForwardingService
-from app.utils import resolve_instance
+from typing import Annotated
 
 import inject
-
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import ValidationError
+from starlette.status import HTTP_422_UNPROCESSABLE_CONTENT
 
-from app.forwarding.models import DvaTarget
-from app.forwarding.schemas import ForwardingRequest
-from app.forwarding.signing.exceptions import (
-    DisallowedTargetHost,
-    InvalidTargetUrlSignature,
-    MissingTargetUrlSignature,
-)
-from app.forwarding.signing.services import DvaTargetVerifier
-from fastapi import Header, HTTPException
 from app.config.models import ForwardingConfig
-
-
-from .constants import (
-    FORWARD_URL_RESPONSE_HEADER,
-    TARGET_URL_SIGNATURE_QUERY_PARAM,
-)
-
 from app.forwarding.constants import (
     DVA_TARGET_REQUEST_HEADER,
     MEDMIJ_ACCESS_TOKEN_HEADER,
     MEDMIJ_CORRELATION_ID_HEADER,
     MGO_DATASERVICE_ID_HEADER,
     MGO_HEALTHCARE_PROVIDER_ID_HEADER,
+)
+from app.forwarding.schemas import ForwardingRequest
+from app.forwarding.services import ForwardingService
+from app.security.dva_target.middlewares import parsed_dva_target_url
+from app.utils import resolve_instance
+
+from .constants import (
+    FORWARD_URL_RESPONSE_HEADER,
 )
 
 router = APIRouter()
@@ -60,37 +49,11 @@ def validate_dataservice_id(
         )
 
 
-@inject.autoparams("dva_target_verifier")
-async def validate_dva_target(
-    dva_target: str,
-    dva_target_verifier: DvaTargetVerifier,
-) -> None:
-    dva_target_model: DvaTarget = DvaTarget.from_dva_target_url(header=str(dva_target))
-    try:
-        await dva_target_verifier.verify(dva_target=dva_target_model)
-    except (
-        InvalidTargetUrlSignature,
-        MissingTargetUrlSignature,
-    ):
-        raise HTTPException(403, "Invalid signature")
-    except DisallowedTargetHost:
-        raise HTTPException(403, "Forbidden")
-
-
-async def validated_forwarding_request(
+def validated_forwarding_request(
     dva_target: str = Header(
         ...,
         alias=DVA_TARGET_REQUEST_HEADER,
-        description=(
-            "The target URL of a specific data service to hit at a healthcare provider. "
-            f"Include the ?{TARGET_URL_SIGNATURE_QUERY_PARAM}= parameter to verify the origin of the target URL."
-        ),
-        examples={  # type: ignore
-            "signed": {
-                "summary": "Signed",
-                "value": "https://mock?target_url_signature=base64_encoded_signature",
-            }
-        },
+        description="A JWE containing a signed JWT which includes the target URL as claim.",
     ),
     oauth_access_token: str = Header(
         None,
@@ -134,12 +97,19 @@ async def validated_forwarding_request(
             "default": {"summary": "Example", "value": 42}
         },
     ),
-    accept: str = Header(None, alias="Accept"),
+    accept: str = Header(
+        ...,
+        alias="Accept",
+        description=(
+            "Accept header that is used to specify the FHIR version"
+            "(for example: application/fhir+json; fhirVersion=3.0)."
+        ),
+    ),
 ) -> ForwardingRequest:
     try:
         forwarding_request = ForwardingRequest.model_validate(
             {
-                DVA_TARGET_REQUEST_HEADER: dva_target,
+                DVA_TARGET_REQUEST_HEADER: parsed_dva_target_url(dva_target=dva_target),
                 MEDMIJ_ACCESS_TOKEN_HEADER: oauth_access_token,
                 MEDMIJ_CORRELATION_ID_HEADER: correlation_id,
                 MGO_HEALTHCARE_PROVIDER_ID_HEADER: x_mgo_provider_id,
@@ -149,7 +119,7 @@ async def validated_forwarding_request(
         )
     except ValidationError as e:
         raise HTTPException(
-            status_code=HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=HTTP_422_UNPROCESSABLE_CONTENT,
             detail=e.errors(),
         )
 
@@ -157,7 +127,6 @@ async def validated_forwarding_request(
         healthcare_provider_id=forwarding_request.x_mgo_provider_id
     )
     validate_dataservice_id(dataservice_id=forwarding_request.x_mgo_service_id)
-    await validate_dva_target(dva_target=forwarding_request.dva_target)
 
     return forwarding_request
 
@@ -190,9 +159,12 @@ async def validated_forwarding_request(
 )
 async def forward_client_request(
     request: Request,
-    forwarding_request: ForwardingRequest = Depends(validated_forwarding_request),
+    forwarding_request: Annotated[
+        ForwardingRequest, Depends(validated_forwarding_request)
+    ],
+    path: str,
     forwarding_service: ForwardingService = resolve_instance(ForwardingService),
 ) -> Response:
     return await forwarding_service.get_resource(
-        request=request, headers=forwarding_request
+        path=f"/fhir/{path}", request=request, headers=forwarding_request
     )

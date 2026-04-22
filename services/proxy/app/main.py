@@ -11,7 +11,7 @@ from .exception_handlers import ExceptionHandlers
 from .forwarding.router import router as forwarding_router
 from .oidc.router import router as oidc_router
 from .telemetry.jaeger_provider import setup_jaeger
-from .utils import root_path
+from .utils import init_healthcheck_router, root_path
 from .version.models import VersionInfo
 from .version.router import router as index_router
 
@@ -44,6 +44,8 @@ def create_app() -> FastAPI:
         forwarding_router,
     ]:
         app.include_router(router)
+
+    init_healthcheck_router(app)
 
     app.add_middleware(
         CORSMiddleware,

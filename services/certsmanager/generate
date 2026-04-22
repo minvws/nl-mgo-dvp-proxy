@@ -4,7 +4,7 @@
 ### Generate certificates for testing with mtls
 ###
 
-ECHO "Generating certificates for testing with mtls"
+echo "Generating certificates for testing with mtls"
 
 OUTPUT=${CERTS_OUTPUT_DIR:-out}
 mkdir -p $OUTPUT
@@ -47,3 +47,6 @@ openssl x509 -req -in $CSR_FILE -CA $CA_CERT_FILE -CAkey $CA_KEY_FILE -CAcreates
 echo "Generated Redis cert and key signed by CA at $CERT_FILE and $KEY_FILE"
 
 rm $CSR_FILE
+
+# Make sure the generated files are readable by non-privileged users
+chmod -R go+r $OUTPUT

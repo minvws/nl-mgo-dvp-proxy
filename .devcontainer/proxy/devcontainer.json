@@ -1,8 +1,7 @@
 {
     "name": "proxy",
     "dockerComposeFile": [
-        "../../docker-compose.yml",
-        "../docker-compose.yml"
+        "../../docker-compose.yml"
     ],
     "service": "proxy",
     "workspaceFolder": "/src/services/proxy",
@@ -20,7 +19,7 @@
                 "bierner.markdown-mermaid"
             ],
             "settings": {
-                "python.defaultInterpreterPath": "/usr/local/bin/python",
+                "python.defaultInterpreterPath": "/src/services/proxy/.venv/bin/python",
                 "python.testing.pytestEnabled": true,
                 "[python]": {
                     "editor.formatOnSave": true,

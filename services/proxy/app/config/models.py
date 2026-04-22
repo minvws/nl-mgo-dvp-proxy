@@ -1,6 +1,6 @@
 import os
 from enum import Enum
-from typing import List, Literal, Self, cast
+from typing import Literal, Self, Set, TypeAlias, cast
 
 from pydantic import (
     AnyHttpUrl,
@@ -30,6 +30,12 @@ class MetricAdapter(str, Enum):  # pragma: no cover
     STATSD = "statsd"
 
 
+class OidcClientAuthType(str, Enum):
+    CLIENT_SECRET_POST = "client_secret_post"
+    PRIVATE_KEY_JWT = "private_key_jwt"
+    NONE = "none"
+
+
 class NoOpMetricConfig(InjectableConfig):  # pragma: no cover
     adapter: Literal[MetricAdapter.NO_OP] = MetricAdapter.NO_OP
 
@@ -57,13 +63,6 @@ class RetryConfig(InjectableConfig):
     backoff: float = Field(gt=0)
     # Factor to increase each subsequent debounce by
     backoff_factor: float = Field(gt=0)
-
-
-class SignatureValidationConfig(InjectableConfig):  # pragma: no cover
-    # Feature flag to enable/disable signature validation
-    verify_signed_requests: bool
-    # A csv list of paths to public keys that can be used to verify signatures, these keys should correspond to the private keys in load
-    public_key_paths: str
 
 
 class CircuitBreaker(InjectableConfig):  # pragma: no cover
@@ -132,12 +131,14 @@ class OAuthConfig(InjectableConfig):
 
 
 class DvaTargetConfig(InjectableConfig):
-    host_blocklist: List[str] = Field(default=["localhost", "127.0.0.1"])
+    jwe_encryption_private_key: str
+    jwt_signing_public_key: str
+    host_blocklist: Set[str] = Field(default=["localhost", "127.0.0.1"])
 
     @field_validator("host_blocklist", mode="before")
     @classmethod
-    def str_to_list(cls, v: str) -> List[str]:
-        return v.split(",") if v != "" else []
+    def str_to_set(cls, v: str) -> set[str]:
+        return set(v.split(",")) if v != "" else set()
 
 
 class TelemetryConfig(InjectableConfig):
@@ -150,8 +151,6 @@ class OidcConfig(InjectableConfig):
     client_id: str
     callback_endpoint: str
     state_secret_path: str
-    client_assertion_jwt_pvt_key_path: str
-    client_assertion_jwt_pub_key_path: str
 
 
 class VadHttpClientConfig(InjectableConfig):
@@ -177,6 +176,32 @@ class ForwardingConfig(InjectableConfig):
     require_provider_and_service_id: bool = False
 
 
+class OidcClientSecretAuth(BaseModel):
+    type: Literal[OidcClientAuthType.CLIENT_SECRET_POST] = (
+        OidcClientAuthType.CLIENT_SECRET_POST
+    )
+    client_secret: str
+
+
+class OidcClientJwtAuth(BaseModel):
+    type: Literal[OidcClientAuthType.PRIVATE_KEY_JWT] = (
+        OidcClientAuthType.PRIVATE_KEY_JWT
+    )
+    client_assertion_jwt_private_key_path: str
+    client_assertion_jwt_public_key_path: str
+
+
+class OidcClientNoAuth(BaseModel):
+    type: Literal[OidcClientAuthType.NONE] = OidcClientAuthType.NONE
+
+
+class OutboundProxyConfig(InjectableConfig):
+    proxy_url: str | None = None
+
+
+OidcClientAuth: TypeAlias = OidcClientSecretAuth | OidcClientJwtAuth | OidcClientNoAuth
+
+
 class AppConfig(BaseModel):
     env: Environment
     logging: LoggingConfig = LoggingConfig()
@@ -185,14 +210,15 @@ class AppConfig(BaseModel):
     tls: TlsConfig | None = None
     metric: StatsdMetricConfig | NoOpMetricConfig = Field(discriminator="adapter")
     retry: RetryConfig
-    signature_validation: SignatureValidationConfig
     circuit_breaker: CircuitBreaker
     redis: Redis
     oauth: OAuthConfig
     # OAuth mTLS configuration
     oauth_tls: OAuthTlsConfig | None = None
-    dva_target: DvaTargetConfig = DvaTargetConfig()
+    dva_target: DvaTargetConfig
     telemetry: TelemetryConfig | None = None
     oidc: OidcConfig
+    oidc_client_auth: OidcClientAuth = Field(discriminator="type")
     vad_http_client: VadHttpClientConfig
     forwarding: ForwardingConfig = ForwardingConfig()
+    outbound_proxy: OutboundProxyConfig | None = None

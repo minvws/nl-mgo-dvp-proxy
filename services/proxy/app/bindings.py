@@ -1,13 +1,12 @@
 import configparser
 import logging
 import logging.config
-from ssl import SSLContext
 from typing import List
 
-from cryptography.hazmat.primitives.asymmetric.ec import ECDSA
-from cryptography.hazmat.primitives.hashes import SHA256
 from httpx import AsyncClient
 from inject import Binder
+from mgo_healthchecker.redis import RedisHealthChecker
+from mgo_healthchecker.utils import HealthCheckerCollection
 from redis import Redis
 from statsd import StatsClient
 
@@ -17,15 +16,18 @@ from app.oidc.repositories import (
     WellKnownVadOidcConfigRepository,
 )
 from app.oidc.services import (
-    ClientAssertionJwtIssuer,
     VadAuthorizationUrlProvider,
     VadUserinfoProvider,
 )
+from app.security.dva_target.services import DvaTargetAssertionParser
 from app.security.repositories import (
-    FilesystemKeyStoreRepository,
-    KeyStoreRepository,
+    FilesystemJWKRepository,
+    FilesystemSecretRepository,
+    JWKRepository,
+    SecretRepository,
 )
 from app.security.services import Encrypter, FernetEncrypter, SslContextFactory
+from app.seeders import JWKRepositorySeeder, SecretRepositorySeeder
 
 from .authentication.adapters import MedMijOauthTokenAdapter, MockedOauthTokenAdapter
 from .authentication.interfaces import OauthTokenAdapter
@@ -41,10 +43,14 @@ from .circuitbreaker.repositories import (
     RedisCircuitStateRepository,
 )
 from .circuitbreaker.services import CircuitBreakerService
-from .config.models import AppConfig, InjectableConfig, MetricAdapter, TlsConfig
+from .config.models import (
+    AppConfig,
+    InjectableConfig,
+    MetricAdapter,
+)
 from .config.services import ConfigParser
 from .forwarding.client import AsyncClientRetryDecorator
-from .forwarding.signing.services import SignedUrlVerifier
+from .http_client.factories import AsyncClientFactory
 from .medmij_logging.factories import LogMessageFactory
 from .medmij_logging.services import MedMijLogger
 from .metrics.clients import MetricClient, NoOpMetricClient
@@ -67,17 +73,17 @@ def configure_bindings(binder: Binder, config_file: str) -> None:
     binder.bind_to_constructor(UrlBuilder, UrlBuilder)
 
     __bind_metric_client(binder, app_config)
-    __bind_async_client(binder, app_config.tls)
-    __bind_async_oauth_client(binder, app_config.oauth_tls)
-    __bind_signed_url_verifier(binder, app_config)
+    __bind_async_client(binder, app_config)
+    __bind_async_oauth_client(binder, app_config)
     __bind_circuit_breaker(binder, app_config)
-    __bind_redis_connection(binder, app_config)
+    redis_client = __bind_redis_connection(binder, app_config)
     __bind_state_service(binder, app_config)
     __bind_medmij_oauth_auth_url_builder(binder, app_config)
     __bind_medmij_oauth_token_adapter(binder, app_config)
     __bind_medmij_logging(binder, app_config)
     __bind_security(binder, app_config)
     __bind_oidc(binder, app_config)
+    __bind_health_checkers(binder, redis_client)
 
 
 def __parse_app_config(config_file: str) -> AppConfig:
@@ -187,26 +193,13 @@ def __bind_metric_client(binder: Binder, app_config: AppConfig) -> None:
     binder.bind(MetricClient, metric_client)
 
 
-def __create_async_client(tls_config: TlsConfig | None) -> AsyncClient:
-    verify: SSLContext | bool = False
-
-    if tls_config is not None:
-        verify = SslContextFactory.create(
-            ca_cert=tls_config.ca_cert,
-            client_cert=tls_config.client_cert,
-            client_key=tls_config.client_key,
-        )
-
-    async_client = AsyncClient(
-        verify=verify,
-        follow_redirects=True,
+def __bind_async_client(
+    binder: Binder,
+    app_config: AppConfig,
+) -> None:
+    async_client: AsyncClient = AsyncClientFactory.create(
+        tls_config=app_config.tls, proxy_config=app_config.outbound_proxy
     )
-
-    return async_client
-
-
-def __bind_async_client(binder: Binder, tls_config: TlsConfig | None) -> None:
-    async_client: AsyncClient = __create_async_client(tls_config)
 
     binder.bind_to_constructor(
         AsyncClient,
@@ -214,24 +207,12 @@ def __bind_async_client(binder: Binder, tls_config: TlsConfig | None) -> None:
     )
 
 
-def __bind_async_oauth_client(binder: Binder, tls_config: TlsConfig | None) -> None:
-    async_client: AsyncClient = __create_async_client(tls_config)
+def __bind_async_oauth_client(binder: Binder, app_config: AppConfig) -> None:
+    async_client: AsyncClient = AsyncClientFactory.create(
+        tls_config=app_config.oauth_tls, proxy_config=app_config.outbound_proxy
+    )
 
     binder.bind(AsyncOAuthClient, async_client)
-
-
-def __bind_signed_url_verifier(binder: Binder, app_config: AppConfig) -> None:
-    binder.bind(
-        SignedUrlVerifier,
-        SignedUrlVerifier(
-            signature_algorithm=ECDSA(SHA256()),
-            public_key_paths=[
-                key
-                for key in app_config.signature_validation.public_key_paths.split(",")
-                if key != ""
-            ],
-        ),
-    )
 
 
 def __bind_circuit_breaker(binder: Binder, app_config: AppConfig) -> None:
@@ -257,7 +238,7 @@ def __bind_circuit_breaker(binder: Binder, app_config: AppConfig) -> None:
     )
 
 
-def __bind_redis_connection(binder: Binder, app_config: AppConfig) -> None:
+def __bind_redis_connection(binder: Binder, app_config: AppConfig) -> Redis:
     redis = Redis(
         host=app_config.redis.host,
         port=app_config.redis.port,
@@ -275,6 +256,8 @@ def __bind_redis_connection(binder: Binder, app_config: AppConfig) -> None:
     )
 
     binder.bind(Redis, redis)
+
+    return redis
 
 
 def __bind_state_service(binder: Binder, app_config: AppConfig) -> None:
@@ -355,7 +338,11 @@ def __bind_oidc(binder: Binder, app_config: AppConfig) -> None:
         VadOidcConfigRepository, lambda: WellKnownVadOidcConfigRepository()
     )
     binder.bind_to_constructor(
-        VadUserinfoProvider, lambda: VadUserinfoProvider(str(app_config.base_url))
+        VadUserinfoProvider,
+        lambda: VadUserinfoProvider(
+            base_url=str(app_config.base_url),
+            oidc_client_auth_config=app_config.oidc_client_auth,
+        ),
     )
     binder.bind_to_constructor(
         VadAuthorizationUrlProvider,
@@ -377,17 +364,26 @@ def __bind_oidc(binder: Binder, app_config: AppConfig) -> None:
 def __bind_security(binder: Binder, app_config: AppConfig) -> None:
     binder.bind_to_constructor(Encrypter, lambda: FernetEncrypter())
 
-    key_store_repository = FilesystemKeyStoreRepository()
-    key_store_repository.add_key_to_store_from_path(
-        FernetEncrypter.KEY_STORE_ID, app_config.oidc.state_secret_path
-    )
-    key_store_repository.add_key_to_store_from_path(
-        ClientAssertionJwtIssuer.KEY_STORE_PVT_KEY_ID,
-        app_config.oidc.client_assertion_jwt_pvt_key_path,
-    )
-    key_store_repository.add_key_to_store_from_path(
-        ClientAssertionJwtIssuer.KEY_STORE_PUB_KEY_ID,
-        app_config.oidc.client_assertion_jwt_pub_key_path,
+    secret_key_store_repository = FilesystemSecretRepository()
+    jwk_key_store_repository = FilesystemJWKRepository()
+
+    SecretRepositorySeeder.seed(secret_key_store_repository, app_config)
+    JWKRepositorySeeder.seed(jwk_key_store_repository, app_config)
+
+    binder.bind(SecretRepository, secret_key_store_repository)
+    binder.bind(JWKRepository, jwk_key_store_repository)
+
+    binder.bind_to_constructor(
+        DvaTargetAssertionParser,
+        lambda: DvaTargetAssertionParser(
+            jwk_repository=jwk_key_store_repository,
+            blocklist=app_config.dva_target.host_blocklist,
+        ),
     )
 
-    binder.bind(KeyStoreRepository, key_store_repository)
+
+def __bind_health_checkers(binder: Binder, redis_client: Redis) -> None:
+    collection = HealthCheckerCollection()
+    collection.append(RedisHealthChecker(redis_client=redis_client))
+
+    binder.bind(HealthCheckerCollection, collection)

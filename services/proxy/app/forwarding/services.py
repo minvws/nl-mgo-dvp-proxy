@@ -1,6 +1,7 @@
 import uuid
 from logging import Logger
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 import inject
 from fastapi import HTTPException, Request, Response
@@ -14,12 +15,9 @@ from app.forwarding.constants import (
     FORWARD_URL_RESPONSE_HEADER,
     MEDMIJ_CORRELATION_ID_HEADER,
     MEDMIJ_REQUEST_ID_HEADER,
-)
-from app.forwarding.constants import (
-    MGO_HEALTHCARE_PROVIDER_ID_HEADER,
     MGO_DATASERVICE_ID_HEADER,
+    MGO_HEALTHCARE_PROVIDER_ID_HEADER,
 )
-from app.forwarding.models import DvaTarget
 from app.medmij_logging.constants import WWW_AUTHENTICATE_HEADER
 from app.medmij_logging.factories import LogMessageFactory
 from app.medmij_logging.services import (
@@ -27,6 +25,7 @@ from app.medmij_logging.services import (
     ServerIdentifier,
     WWWAuthenticateParser,
 )
+from app.security.utils import LogSanitizer
 
 from .schemas import ForwardingRequest
 
@@ -244,6 +243,12 @@ class ForwardingService:
         if query and query.startswith("?"):
             raise ValueError("The query string must not start with a '?'.")
 
+        # When the DVA target already points to a FHIR base endpoint, avoid
+        # forwarding to `/fhir/fhir/...` by trimming one leading segment.
+        target_path = urlsplit(target_url).path.rstrip("/")
+        if target_path.endswith("/fhir") and path.startswith("/fhir/"):
+            path = path[len("/fhir") :]
+
         query_string = f"?{query}" if query else ""
         return f"{target_url.rstrip('/')}{path}{query_string}"
 
@@ -268,19 +273,15 @@ class ForwardingService:
         }
 
     async def get_resource(
-        self, request: Request, headers: ForwardingRequest
+        self, path: str, request: Request, headers: ForwardingRequest
     ) -> Response:
-        dva_target: DvaTarget = DvaTarget.from_dva_target_url(str(headers.dva_target))
-
-        # Get target_url which is already stripped of the signature
-        target_url: str = dva_target.target_url
-        path: str = request.url.path
-        query: str = request.url.query
-
         forward_url: str = self.generate_forward_url(
-            target_url=target_url, path=path, query=query
+            target_url=str(headers.dva_target),
+            path=path,
+            query=request.url.query,
         )
         forward_headers: dict[str, str] = self.get_forward_headers(headers=headers)
+
         op_inject(forward_headers)
         trace_id = str(
             headers.correlation_id if headers.correlation_id else uuid.uuid4()
@@ -303,7 +304,7 @@ class ForwardingService:
             )
         except (TimeoutException, CircuitOpenException) as exc:
             self.logger.error(
-                f"TimeoutException occurred while forwarding request to {forward_url}",
+                f"TimeoutException during forwarding attempt. Upstream URL: {LogSanitizer.sanitize(forward_url)}",
                 exc_info=exc,
             )
 
@@ -330,7 +331,7 @@ class ForwardingService:
         )
 
         self.logger.info(
-            f"Executed Forward request to {forward_url} and received status code {httpx_response.status_code}"
+            f"Executed Forward request to {LogSanitizer.sanitize(forward_url)} and received status code {httpx_response.status_code}"
         )
 
         response_headers: dict[Any, Any] = self.filter_response_headers(

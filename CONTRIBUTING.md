@@ -18,7 +18,7 @@ If you encounter any issues or have suggestions for improvements, please feel fr
 ## Coding Standards
 
 - Follow the existing coding style.
-- Write clear and concise commit messages.
+- Write clear and concise commit messages following the [Conventional Commits specification](https://www.conventionalcommits.org/).
 - Include comments in your code where necessary.
 
 ## Code of Conduct

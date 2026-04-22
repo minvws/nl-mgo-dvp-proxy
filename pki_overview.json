@@ -1,0 +1,183 @@
+[
+    {
+        "id": "mgo-dvp-proxy:6d7a2e0c-7d4c-4fd5-9c1a-1f5d5bcd942e",
+        "label": "oidc state secret",
+        "purpose": "Encrypting a set of data pertaining to a single OIDC authorization flow. This encrypted value is used as authorization state.",
+        "specs": {
+            "type": "secret-key",
+            "encryption": "AES",
+            "length": "256-bit",
+            "format": "base64",
+            "generator": "services/proxy/tools/generate-oidc-state-secret.py"
+        },
+        "default_path": "services/proxy/secrets/oidc-state.key",
+        "tags": []
+    },
+    {
+        "id": "mgo-dvp-proxy:0f9cb9c2-2cd0-4ef5-a826-0f2bb2348df8",
+        "label": "oidc client assertion jwt (private key)",
+        "purpose": "Generating a signed JWT. Given that the 'private_jwt' token endpoint authentication method is configured, the generated JWT is a means of authenticating the MGO DVP Proxy as a valid OIDC client in the VAD.",
+        "specs": {
+            "type": "private-key",
+            "encryption": "RSA",
+            "length": "2048-bit",
+            "format": "pem",
+            "generator": "services/proxy/tools/generate-key-pair.py"
+        },
+        "default_path": "services/proxy/secrets/client_assertion_jwt.key",
+        "tags": []
+    },
+    {
+        "id": "mgo-dvp-proxy:4ce5bd2f-e650-4f9f-9508-53b8bfa503a9",
+        "label": "oidc client assertion jwt (public key)",
+        "purpose": "Generating a signed JWT. Given that the 'private_jwt' token endpoint authentication method is configured, the generated JWT is a means of authenticating the MGO DVP Proxy as a valid OIDC client in the VAD. The public key part of this key-pair is distributed to the VAD to perform the validation.",
+        "specs": {
+            "type": "public-key",
+            "encryption": "RSA",
+            "length": "2048-bit",
+            "format": "pem",
+            "generator": "mgo-dvp-proxy:services/proxy/tools/generate-key-pair.py"
+        },
+        "default_path": "services/proxy/secrets/client_assertion_jwt.key",
+        "tags": []
+    },
+    {
+        "id": "mgo-dvp-proxy:7b3410e8-b97a-4f24-8b3f-5b01a6ca63ad",
+        "label": "oauth state secret",
+        "purpose": "Used internally to encrypt a set of data pertaining to a single OAuth authorization flow. This encrypted value is used as authorization state.",
+        "specs": {
+            "type": "secret-key",
+            "encryption": "AES",
+            "length": "256-bit",
+            "format": "base64",
+            "generator": "services/proxy/tools/generate_oauth_state_signing_key.py"
+        },
+        "default_path": "services/proxy/secrets/oauth_state_signing_key.key",
+        "tags": []
+    },
+    {
+        "id": "mgo-dvp-proxy:8a32e067-7e55-4a6b-a552-3abf06f354e9",
+        "label": "medmij mtls client private key",
+        "purpose": "Authenticating MGO DVP Proxy when setting up an mTLS connection with MedMij.",
+        "specs": {
+            "type": "private-key",
+            "encryption": "RSA",
+            "length": "2048-bit",
+            "format": "pem",
+            "generator": "manual"
+        },
+        "default_path": "services/proxy/certs/out/client.key",
+        "tags": [
+            "pkio"
+        ]
+    },
+    {
+        "id": "mgo-dvp-proxy:2b7a4f76-e158-4e63-9f25-0ee4b7047023",
+        "label": "medmij mtls client x509 certificate",
+        "purpose": "Authenticating MGO DVP Proxy when setting up an mTLS connection with MedMij.",
+        "specs": {
+            "type": "certificate",
+            "encryption": "RSA",
+            "length": "2048-bit",
+            "format": "pem",
+            "generator": "manual"
+        },
+        "default_path": "services/proxy/certs/out/client.crt",
+        "tags": [
+            "pkio"
+        ]
+    },
+    {
+        "id": "mgo-dvp-proxy:5a7de028-1f3a-4f3d-8a13-26f66b472d49",
+        "label": "medmij mtls CA x509 certificate",
+        "purpose": "Authenticating MGO DVP Proxy when setting up an mTLS connection with MedMij.",
+        "specs": {
+            "type": "certificate",
+            "encryption": "RSA",
+            "length": "2048-bit",
+            "format": "pem",
+            "generator": "manual"
+        },
+        "default_path": "services/proxy/certs/out/ca.crt",
+        "tags": [
+            "pkio"
+        ]
+    },
+    {
+        "id": "mgo-dvp-proxy:0c3ab7aa-e689-4b48-8b22-664dbb017413",
+        "label": "dva-mock mtls client private key",
+        "purpose": "Authenticating MGO DVP Proxy when setting up an mTLS connection with DVA Mock.",
+        "specs": {
+            "type": "private-key",
+            "encryption": "RSA",
+            "length": "2048-bit",
+            "format": "pem",
+            "generator": "services/certsmanager/generate"
+        },
+        "default_path": "services/proxy/certs/out/client.key",
+        "tags": []
+    },
+    {
+        "id": "mgo-dvp-proxy:4dbf18dc-b843-48f2-a2fb-e3b2f31bf40d",
+        "label": "dva-mock mtls client x509 certificate",
+        "purpose": "Authenticating the MGO DVP Proxy when setting up an mTLS connection with DVA Mock.",
+        "specs": {
+            "type": "certificate",
+            "encryption": "RSA",
+            "length": "2048-bit",
+            "format": "pem",
+            "generator": "services/certsmanager/generate"
+        },
+        "default_path": "services/proxy/certs/out/client.crt",
+        "tags": []
+    },
+    {
+        "id": "mgo-dvp-proxy:58f7b4b7-0e42-48eb-ac86-019b9b9cc8b2",
+        "label": "dva-mock mtls CA x509 certificate",
+        "purpose": "Authenticating the MGO DVP Proxy when setting up an mTLS connection with DVA Mock.",
+        "specs": {
+            "type": "certificate",
+            "encryption": "RSA",
+            "length": "2048-bit",
+            "format": "pem",
+            "generator": "services/certsmanager/generate"
+        },
+        "default_path": "services/proxy/certs/out/ca.crt",
+        "tags": []
+    },
+    {
+        "id": "mgo-localization:91c0c8d4-0c53-4c2c-8291-4c6a1b8e017e",
+        "label": "dva target jwt signature validation public key",
+        "purpose": "Validating a JWT signature containing a DVA endpoint as claim created by the MGO Localization app.",
+        "default_path": "",
+        "tags": []
+    },
+    {
+        "id": "mgo-dvp-proxy:98b1bc97-09a8-4fe2-8a7b-6b655d8ddbc1",
+        "label": "dva target jwe encryption private key",
+        "purpose": "Decrypting a JWE containing a JWT with DVA endpoint claim created by the MGO Localization app.",
+        "specs": {
+            "type": "private-key",
+            "encryption": "RSA",
+            "length": "2048-bit",
+            "format": "pem",
+            "generator": "services/proxy/tools/generate-key-pair.py"
+        },
+        "default_path": "services/proxy/secrets/dva_target/jwe.key",
+        "tags": []
+    },
+    {
+        "id": "mgo-dvp-proxy:ddd1c679-fdee-499e-88dc-d58ed4bad011",
+        "label": "dva target jwe encryption public key",
+        "purpose": "Encrypting a JWE containing a JWT with DVA endpoint claim created by the MGO Localization app.",
+        "specs": {
+            "type": "public-key",
+            "encryption": "RSA",
+            "length": "2048-bit",
+            "format": "pem",
+            "generator": "services/proxy/tools/generate-key-pair.py"
+        },
+        "default_path": "services/proxy/secrets/dva_target/jwe.pub",
+        "tags": []
+    }
+]

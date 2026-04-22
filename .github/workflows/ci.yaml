@@ -20,7 +20,7 @@ jobs:
 
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v4
+              uses: actions/checkout@v6
               with:
                 fetch-depth: 0
 
@@ -28,6 +28,7 @@ jobs:
               uses: ./.github/actions/setup-app
               with:
                 app-dir: ./services/proxy
+                github-token: ${{ secrets.REPO_READ_ONLY_TOKEN }}
 
     lint:
         name: Run code linter
@@ -36,16 +37,17 @@ jobs:
 
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v4
+              uses: actions/checkout@v6
 
             - name: Setup app
               uses: ./.github/actions/setup-app
               with:
                 app-dir: ./services/proxy
+                github-token: ${{ secrets.REPO_READ_ONLY_TOKEN }}
 
             - name: Lint
               working-directory: ./services/proxy
-              run: poetry run $(make lint --just-print --silent)
+              run: uv run $(make lint --just-print --silent)
 
     format:
         name: Run formatter
@@ -54,16 +56,17 @@ jobs:
 
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v4
+              uses: actions/checkout@v6
 
             - name: Setup app
               uses: ./.github/actions/setup-app
               with:
                 app-dir: ./services/proxy
+                github-token: ${{ secrets.REPO_READ_ONLY_TOKEN }}
 
             - name: Find format differences
               working-directory: ./services/proxy
-              run: poetry run ruff format --diff
+              run: uv run $(make format-diff --just-print --silent)
 
     type-check:
         name: Check static types
@@ -72,16 +75,17 @@ jobs:
 
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v4
+              uses: actions/checkout@v6
 
             - name: Setup app
               uses: ./.github/actions/setup-app
               with:
                 app-dir: ./services/proxy
+                github-token: ${{ secrets.REPO_READ_ONLY_TOKEN }}
 
             - name: Check static types
               working-directory: ./services/proxy
-              run: poetry run $(make type-check --just-print --silent)
+              run: uv run $(make type-check --just-print --silent)
 
     spelling-check:
         name: Run spelling check
@@ -90,16 +94,17 @@ jobs:
 
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v4
+              uses: actions/checkout@v6
 
             - name: Setup app
               uses: ./.github/actions/setup-app
               with:
                 app-dir: ./services/proxy
+                github-token: ${{ secrets.REPO_READ_ONLY_TOKEN }}
 
             - name: Run spelling check
               working-directory: ./services/proxy
-              run: poetry run $(make spelling-check --just-print --silent)
+              run: uv run $(make spelling-check --just-print --silent)
 
     test:
         name: Run the tests
@@ -108,12 +113,13 @@ jobs:
 
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v4
+              uses: actions/checkout@v6
 
             - name: Setup app
               uses: ./.github/actions/setup-app
               with:
                 app-dir: ./services/proxy
+                github-token: ${{ secrets.REPO_READ_ONLY_TOKEN }}
 
             - name: Generate certificates
               working-directory: ./services/certsmanager
@@ -122,9 +128,11 @@ jobs:
             - name: Generate keys
               working-directory: ./services/proxy
               run: |
-                poetry run python tools/generate_oauth_state_signing_key.py secrets/oauth_state_signing_key.key --force
-                poetry run python tools/generate-client-assertion-jwt-key-pair.py
-                poetry run python tools/generate-oidc-state-secret.py
+                uv run python tools/generate_oauth_state_signing_key.py secrets/oauth_state_signing_key.key --force
+                uv run python tools/generate-key-pair.py --name=client_assertion_jwt
+                uv run python tools/generate-key-pair.py --name=jwe --path=secrets/dva_target
+                uv run python tools/generate-key-pair.py --type=ec --name=placeholder_jwt_signing --path=secrets/dva_target
+                uv run python tools/generate-oidc-state-secret.py
 
             - name: Copy "app.conf.test" to "app.conf"
               working-directory: ./services/proxy
@@ -132,10 +140,10 @@ jobs:
 
             - name: Run the tests
               working-directory: ./services/proxy
-              run: poetry run $(make test-cov-xml --just-print --silent)
+              run: uv run $(make test-cov-xml --just-print --silent)
 
             - name: Upload coverage report
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v7
               with:
                 name: coverage-proxy
                 path: services/proxy
@@ -146,18 +154,19 @@ jobs:
         needs: test
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v4
+              uses: actions/checkout@v6
               with:
                 fetch-depth: 0
 
             - name: Download coverage report
-              uses: actions/download-artifact@v4
+              uses: actions/download-artifact@v8
               with:
                 name: coverage-proxy
                 path: services/proxy
 
-            - name: Run SonarCloud scanner
-              uses: minvws/nl-irealisatie-generic-pipelines/.github/actions/sonarcloud@main
+            - name: Run SonarQube scan
+              uses: minvws/action-sonarqube@v1
               with:
                 sonar-token: ${{ secrets.SONAR_TOKEN }}
                 project-base-dir: services/proxy
+                allow-run-on-dependabot: 'true'

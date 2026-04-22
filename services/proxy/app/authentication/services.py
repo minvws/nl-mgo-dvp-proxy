@@ -150,7 +150,9 @@ class MedMijAuthRequestUrlDirector:
         self._builder.add_param("response_type", "code")
 
     def add_redirect_uri(self) -> None:
-        self._builder.add_param("redirect_uri", parse.quote(self._redirect_url))
+        self._builder.add_param(
+            "redirect_uri", parse.quote(self._redirect_url, safe="")
+        )
 
     def add_scope(self, scope: str) -> None:
         self._builder.add_param("scope", scope)

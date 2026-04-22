@@ -1,35 +1,54 @@
-from typing import Dict, Self
+from typing import Annotated, Dict, Self
 
 from fastapi import Query
 from httpx import AsyncClient
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationInfo,
+    field_validator,
+)
+
+EXAMPLE_JWE = "eyJhbGciOiJSU0EtT0FFUC0yNTYiLCJlbmMiOiJBMjU2R0NNIn0..."
+NonBlankStr = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
 
 
 class GetStateRequest(BaseModel):
-    authorization_server_url: str = Field(
-        description="The URL of the authorization server to be used in the authentication flow",
-        examples=[
-            "http://localhost:8001/auth",
-        ],
+    auth_endpoint_jwe: str = Field(
+        ...,
+        alias="authorization_server_url",
+        description="A JWE containing a signed JWT which includes the authorization server URL as claim.",
+        examples=[EXAMPLE_JWE],
     )
-    token_endpoint_url: str = Field(
-        description="The URL to fetch an access_token.",
-        examples=[
-            "http://localhost:8001/token",
-        ],
+    token_endpoint_jwe: str = Field(
+        ...,
+        alias="token_endpoint_url",
+        description="A JWE containing a signed JWT which includes the token server URL as claim.",
+        examples=[EXAMPLE_JWE],
     )
     medmij_scope: str = Field(
+        ...,
         description="The scope (zorgaanbieder_id) of the zorgaanbieder that access is being requested to.",
         examples=[
             "eenofanderezorgaanbieder",
         ],
     )
     client_target_url: str = Field(
+        ...,
         description="The URL of the client application that can store the access_token data and correlation id.",
         examples=[
             "https://client.example.com/callback",
         ],
     )
+
+
+class ParsedGetStateRequest(BaseModel):
+    auth_endpoint_url: NonBlankStr
+    token_endpoint_url: NonBlankStr
+    medmij_scope: NonBlankStr
+    client_target_url: NonBlankStr
 
 
 class GetStateResponse(BaseModel):
@@ -134,22 +153,29 @@ class OAuthCallbackRequest(BaseModel):
 
 
 class OAuthRefreshRequest(BaseModel):
-    refresh_token: str = Query(description="Authorization refresh code.")
-    token_endpoint_url: str = Query(
-        description="An encoded URL to refresh the access_token."
+    token_endpoint_jwe: str = Query(
+        ...,
+        alias="token_endpoint_url",
+        description="A JWE containing a signed JWT which includes the token server URL as claim.",
+        examples=[EXAMPLE_JWE],
+    )
+    refresh_token: str = Query(
+        ...,
+        description="Authorization refresh code.",
+        examples=["tGzv3JOkF0XG5Qx2TlKWIA"],
     )
     correlation_id: str = Query(
+        ...,
         description="""A UUID which is linked to the authorization session and which should be
-            equal to the X-Correlation-id sent during authorization."""
+            equal to the X-Correlation-id sent during authorization.""",
+        examples=["123e4567-e89b-12d3-a456-426614174000"],
     )
 
-    @field_validator(
-        "refresh_token", "token_endpoint_url", "correlation_id", mode="before"
-    )
-    def not_empty(cls, value: str | None, info: ValidationInfo) -> str | None:
-        if value is not None and not value.strip():
-            raise ValueError(f'Property "{info.field_name}" may not be empty')
-        return value
+
+class ParsedOAuthRefreshRequest(BaseModel):
+    token_endpoint_url: NonBlankStr
+    refresh_token: NonBlankStr
+    correlation_id: NonBlankStr
 
 
 class AsyncOAuthClient(AsyncClient):

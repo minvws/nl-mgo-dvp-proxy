@@ -1,4 +1,4 @@
-## Release vX.Y.Z
+# Release vX.Y.Z
 
 Provide a brief description of the release.
 
@@ -13,7 +13,7 @@ Provide a brief description of the release.
 - [ ] `HOSTING_CHANGELOG.md` has been updated.
 - [ ] Manual QA has been completed on a local machine (for RC releases only).
 - [ ] Release tag is prepared (`vX.Y.Z` / `vX.Y.Z-rcX`).
-- [ ] Product owner has granted permission to release to the acceptance environment.
+- [ ] Product owner has granted permission to release to the acceptance environment, in case of acceptance release.
 
 ### Post-release actions
 

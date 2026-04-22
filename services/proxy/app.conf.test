@@ -10,10 +10,6 @@ max_retries=1
 backoff=0.25
 backoff_factor=1.5
 
-[signature_validation]
-verify_signed_requests=True
-public_key_paths=/foo
-
 [circuit_breaker]
 state_storage=memory
 
@@ -26,6 +22,10 @@ signature_lifetime_secs=900
 auth_redirect_uri=/auth/callback
 mock_oauth_servers=true
 
+[dva_target]
+jwe_encryption_private_key=./secrets/dva_target/jwe.key
+jwt_signing_public_key=./secrets/dva_target/placeholder_jwt_signing.pub
+
 [telemetry]
 enabled=False
 
@@ -33,8 +33,9 @@ enabled=False
 client_id=7383d3d9-b747-4317-bde2-0e9385d5b9d6
 callback_endpoint=/oidc/callback
 state_secret_path=secrets/oidc-state.key
-client_assertion_jwt_pvt_key_path=secrets/client_assertion_jwt.key
-client_assertion_jwt_pub_key_path=secrets/client_assertion_jwt.pem
+
+[oidc_client_auth]
+type=none
 
 [vad_http_client]
 url=http://localhost:8006

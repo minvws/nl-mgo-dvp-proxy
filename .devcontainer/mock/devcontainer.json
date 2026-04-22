@@ -1,14 +1,20 @@
 {
     "name": "mock",
     "dockerComposeFile": [
-        "../../docker-compose.yml",
-        "../docker-compose.yml"
+        "../../docker-compose.yml"
     ],
     "service": "mock",
     "workspaceFolder": "/src/services/nl-mgo-dva-mock-private",
     "shutdownAction": "stopCompose",
     "remoteUser": "app",
+    "mounts": [
+        "source=${localEnv:HOME}${localEnv:USERPROFILE}/.gnupg,target=/home/app/.gnupg,type=bind"
+    ],
+    "features": {
+        "ghcr.io/devcontainers-contrib/features/pre-commit:2": {}
+    },
     "initializeCommand": ".devcontainer/init.sh",
+    "postCreateCommand": "pre-commit install --install-hooks",
     "customizations": {
         "vscode": {
             "extensions": [

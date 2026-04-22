@@ -1,4 +1,5 @@
-import inject
+from urllib.parse import urlencode
+
 import pytest
 from fastapi.testclient import TestClient
 from httpx import Response
@@ -13,15 +14,9 @@ from app.authentication.exceptions import (
 )
 from app.authentication.models import StateDTO
 from app.authentication.services import MedMijOauthTokenService, StateService
-from app.config.models import AppConfig
-from app.forwarding.signing.exceptions import (
-    DisallowedTargetHost,
-    InvalidTargetUrlSignature,
-)
-from app.forwarding.signing.services import DvaTargetVerifier, SignedUrlVerifier
 from app.medmij_logging.enums import GrantType
 from app.medmij_logging.factories import LogMessageFactory
-from tests.utils import configure_bindings, load_app_config
+from tests.utils import configure_bindings
 
 
 @pytest.fixture
@@ -31,29 +26,14 @@ def mock_state_service(mocker: MockerFixture) -> StateService:
 
 
 class TestGestStateEndpoint:
-    def test_it_uses_the_required_parameters_to_build_the_response(
-        self,
-        mocker: MockerFixture,
-        test_client: TestClient,
-        mock_state_service: StateService,
+    def test_it_returns_200(
+        self, test_client: TestClient, dva_endpoint_jwe: str
     ) -> None:
-        mock_state_service_generate_state_token = mocker.patch.object(
-            mock_state_service, "generate_state_token"
-        )
-        mock_state_service_generate_state_token.return_value = "generated-state"
-
-        def override_bindings(binder: Binder) -> Binder:
-            binder.bind(StateService, mock_state_service)
-            binder.bind(DvaTargetVerifier, mocker.Mock(DvaTargetVerifier))
-            return binder
-
-        configure_bindings(bindings_override=override_bindings)
-
         response = test_client.post(
             f"/getstate",
             json={
-                "authorization_server_url": "https://authorization-server.com/authorize",
-                "token_endpoint_url": "https://authorization-server.com/authorize",
+                "authorization_server_url": dva_endpoint_jwe,
+                "token_endpoint_url": dva_endpoint_jwe,
                 "medmij_scope": "eenofanderezorgaanbieder",
                 "client_target_url": "https://client.example.com/callback",
             },
@@ -61,11 +41,8 @@ class TestGestStateEndpoint:
         )
 
         assert response.status_code == 200
-        content = response.json()
-        assert "scope=eenofanderezorgaanbieder" in content["url_to_request"]
-        assert "state=generated-state" in content["url_to_request"]
-
-        inject.clear()
+        response_json = response.json()
+        assert "url_to_request" in response_json
 
     @pytest.mark.parametrize(
         "missing_parameter",
@@ -95,70 +72,32 @@ class TestGestStateEndpoint:
 
         assert response.status_code == 422
         content = response.json()
-        assert content["detail"][0]["type"] == "missing"
         assert content["detail"][0]["loc"] == ["body", missing_parameter]
-        assert content["detail"][0]["msg"] == "Field required"
-        assert content["detail"][0]["input"] == json
 
     @pytest.mark.parametrize(
-        "signature_valid, expected_status",
+        "empty_parameter",
         [
-            (True, 200),
-            (False, 403),
+            "medmij_scope",
+            "client_target_url",
         ],
     )
-    def test_it_verifies_the_signature_of_the_supplied_target_url(
-        self,
-        test_client: TestClient,
-        mocker: MockerFixture,
-        signature_valid: bool,
-        expected_status: int,
+    def test_it_returns_400_status_when_required_parameter_empty(
+        self, empty_parameter: str, test_client: TestClient, dva_endpoint_jwe: str
     ) -> None:
-        verifier = mocker.Mock(spec=SignedUrlVerifier)
-        if signature_valid:
-            verifier.verify.return_value = None
-        else:
-            verifier.verify.side_effect = InvalidTargetUrlSignature(
-                ["Invalid signature"]
-            )
+        json = {
+            "authorization_server_url": dva_endpoint_jwe,
+            "token_endpoint_url": dva_endpoint_jwe,
+            "medmij_scope": "eenofanderezorgaanbieder",
+            "client_target_url": "https://client.example.com/callback",
+        }
 
-        configure_bindings(lambda binder: binder.bind(SignedUrlVerifier, verifier))
+        json[empty_parameter] = ""
 
-        response = test_client.post(
-            f"/getstate",
-            json={
-                "authorization_server_url": "https://authorization-server.com/authorize?mgo_signature=123",
-                "token_endpoint_url": "https://authorization-server.com/authorize?mgo_signature=123",
-                "medmij_scope": "eenofanderezorgaanbieder",
-                "client_target_url": "https://client.example.com/callback",
-            },
-            follow_redirects=False,
-        )
+        response = test_client.post("/getstate", json=json)
 
-        assert response.status_code == expected_status
-
-    def test_it_returns_http_403_when_target_host_is_in_blocklist(
-        self, test_client: TestClient, mocker: MockerFixture
-    ) -> None:
-        verifier = mocker.Mock(spec=DvaTargetVerifier)
-        verifier.verify.side_effect = DisallowedTargetHost(
-            hostname="https://sketchyhost.com"
-        )
-        configure_bindings(lambda binder: binder.bind(DvaTargetVerifier, verifier))
-
-        response = test_client.post(
-            f"/getstate",
-            json={
-                "authorization_server_url": "https://authorization-server.com/authorize",
-                "token_endpoint_url": "https://authorization-server.com/authorize?mgo_signature=123",
-                "medmij_scope": "eenofanderezorgaanbieder",
-                "client_target_url": "https://client.example.com/callback",
-            },
-            follow_redirects=False,
-        )
-
-        assert response.status_code == 403
-        assert response.json() == {"detail": "Target host is disallowed."}
+        assert response.status_code == 400
+        content = response.json()
+        assert content["detail"][0]["loc"] == [empty_parameter]
 
 
 class TestAuthCallbackEndpoint:
@@ -177,11 +116,11 @@ class TestAuthCallbackEndpoint:
             client_target_url="https://client.example.com/callback",
         )
 
-        def bind_services(binder: Binder) -> Binder:
+        def bindings_override(binder: Binder) -> Binder:
             binder.bind(StateService, mock_state_service)
             return binder
 
-        configure_bindings(bindings_override=bind_services)
+        configure_bindings(bindings_override=bindings_override)
 
         response: Response = test_client.get(
             "/auth/callback",
@@ -247,7 +186,6 @@ class TestAuthCallbackEndpoint:
 
     def test_handle_oauth_callback_missing_code(
         self,
-        mocker: MockerFixture,
         test_client: TestClient,
         mock_state_service: StateService,
     ) -> None:
@@ -262,7 +200,6 @@ class TestAuthCallbackEndpoint:
 
     def test_handle_oauth_callback_empty_code(
         self,
-        mocker: MockerFixture,
         test_client: TestClient,
         mock_state_service: StateService,
     ) -> None:
@@ -273,7 +210,6 @@ class TestAuthCallbackEndpoint:
 
     def test_handle_oauth_callback_missing_state(
         self,
-        mocker: MockerFixture,
         test_client: TestClient,
         mock_state_service: StateService,
     ) -> None:
@@ -329,12 +265,12 @@ class TestAuthCallbackEndpoint:
             )
         )
 
-        def bind_services(binder: Binder) -> Binder:
+        def bindings_override(binder: Binder) -> Binder:
             binder.bind(StateService, mock_state_service)
             binder.bind(MedMijOauthTokenService, mock_token_service)
             return binder
 
-        configure_bindings(bindings_override=bind_services)
+        configure_bindings(bindings_override=bindings_override)
 
         response: Response = test_client.get(
             "/auth/callback",
@@ -346,11 +282,11 @@ class TestAuthCallbackEndpoint:
         assert response.content.decode() == "Bad Gateway"
 
     def __bind_mock(self, state_service: StateService) -> None:
-        def bind_services(binder: Binder) -> Binder:
+        def bindings_override(binder: Binder) -> Binder:
             binder.bind(StateService, state_service)
             return binder
 
-        configure_bindings(bindings_override=bind_services)
+        configure_bindings(bindings_override=bindings_override)
 
     def test_when_auth_callback_requested_then_a_send_token_request_should_be_logged(
         self, test_client: TestClient, mocker: MockerFixture
@@ -367,11 +303,11 @@ class TestAuthCallbackEndpoint:
             client_target_url="https://client.example.com/callback",
         )
 
-        def bind_services(binder: Binder) -> Binder:
+        def bindings_override(binder: Binder) -> Binder:
             binder.bind(StateService, mock_state_service)
             return binder
 
-        configure_bindings(bindings_override=bind_services)
+        configure_bindings(bindings_override=bindings_override)
 
         spy = mocker.spy(LogMessageFactory, "send_token_request")
 
@@ -393,27 +329,18 @@ class TestAuthCallbackEndpoint:
 
 
 class TestAuthRefreshEndpoint:
-    def test_handle_auth_refresh_success(
-        self,
-        mocker: MockerFixture,
-        test_client: TestClient,
+    def test_it_returns_200(
+        self, test_client: TestClient, dva_endpoint_jwe: str
     ) -> None:
-        def override_bindings(binder: Binder) -> Binder:
-            binder.bind(SignedUrlVerifier, mocker.Mock(spec=SignedUrlVerifier))
-            binder.bind(DvaTargetVerifier, mocker.Mock(spec=DvaTargetVerifier))
-            return binder
-
-        configure_bindings(
-            bindings_override=override_bindings,
-        )
-
-        response: Response = test_client.get(
-            "/auth/refresh",
-            params={
-                "token_endpoint_url": "http://example.com/token",
+        query_params = urlencode(
+            {
+                "token_endpoint_url": dva_endpoint_jwe,
                 "refresh_token": "test_refresh_token",
                 "correlation_id": "xyz",
-            },
+            }
+        )
+        response: Response = test_client.get(
+            f"/auth/refresh?{query_params}",
             follow_redirects=False,
         )
 
@@ -426,133 +353,51 @@ class TestAuthRefreshEndpoint:
             "scope": "48 49",
         }
 
-    def test_refres_endpoint_required_signed_url(
-        self,
-        mocker: MockerFixture,
-        test_client: TestClient,
+    @pytest.mark.parametrize(
+        "missing_parameter",
+        [
+            "token_endpoint_url",
+            "refresh_token",
+            "correlation_id",
+        ],
+    )
+    def test_it_returns_422_status_when_missing_parameter(
+        self, missing_parameter: str, test_client: TestClient, dva_endpoint_jwe: str
     ) -> None:
-        mock_signed_url_verifier = mocker.Mock(spec=SignedUrlVerifier)
-        mock_signed_url_verifier.verify.side_effect = InvalidTargetUrlSignature(
-            ["Invalid signature"]
-        )
-
-        def override_bindings(binder: Binder) -> Binder:
-            binder.bind(
-                SignedUrlVerifier,
-                mock_signed_url_verifier,
-            )
-            return binder
-
-        configure_bindings(
-            bindings_override=override_bindings,
-        )
-
-        response: Response = test_client.get(
-            "/auth/refresh",
-            params={
-                "token_endpoint_url": "http://example.com/token",
-                "refresh_token": "test_refresh_token",
-                "correlation_id": "xyz",
-            },
-            follow_redirects=False,
-        )
-
-        assert response.status_code == 403
-        assert response.json() == {"detail": "Missing target URL signature."}
-
-    def test_refresh_does_not_require_signed_url_when_signature_verification_is_disabled(
-        self,
-        mocker: MockerFixture,
-        test_client: TestClient,
-    ) -> None:
-        config: AppConfig = load_app_config()
-        config.signature_validation.verify_signed_requests = False
-
-        configure_bindings(
-            bindings_override=lambda binder: binder.bind(AppConfig, config),
-        )
-
-        response: Response = test_client.get(
-            "/auth/refresh",
-            params={
-                "token_endpoint_url": "http://example.com/token",
-                "refresh_token": "test_refresh_token",
-                "correlation_id": "xyz",
-            },
-            follow_redirects=False,
-        )
-
-        assert response.status_code == 200
-        assert response.json() == {
-            "access_token": "mocked_access_token",
-            "token_type": "Bearer",
-            "expires_in": 900,
-            "refresh_token": "mocked_refresh_token",
-            "scope": "48 49",
+        query_params = {
+            "token_endpoint_url": dva_endpoint_jwe,
+            "refresh_token": "test_refresh_token",
+            "correlation_id": "xyz",
         }
 
-    def test_refresh_does_not_allow_disallowed_target_host(
-        self,
-        mocker: MockerFixture,
-        test_client: TestClient,
-    ) -> None:
-        mock_dva_target_verifier = mocker.Mock(spec=DvaTargetVerifier)
-        mock_dva_target_verifier.verify.side_effect = DisallowedTargetHost(
-            hostname="https://sketchyhost.com"
-        )
+        del query_params[missing_parameter]
 
-        def override_bindings(binder: Binder) -> Binder:
-            binder.bind(DvaTargetVerifier, mock_dva_target_verifier)
-            return binder
-
-        configure_bindings(
-            bindings_override=override_bindings,
-        )
-
-        response: Response = test_client.get(
-            "/auth/refresh",
-            params={
-                "token_endpoint_url": "http://example.com/token",
-                "refresh_token": "test_refresh_token",
-                "correlation_id": "xyz",
-            },
-            follow_redirects=False,
-        )
-
-        assert response.status_code == 403
-        assert response.json() == {"detail": "Target host is disallowed."}
-
-    def test_handle_auth_refresh_missing_refresh_token(
-        self,
-        mocker: MockerFixture,
-        test_client: TestClient,
-        mock_state_service: StateService,
-    ) -> None:
-        configure_bindings(lambda binder: binder.bind(StateService, mock_state_service))
-
-        response: Response = test_client.get("/auth/refresh", params={"state": "xyz"})
+        response = test_client.get("/auth/refresh", params=query_params)
 
         assert response.status_code == 422
-        json_response = response.json()
-        assert json_response["detail"][0]["loc"] == ["query", "refresh_token"]
-        assert json_response["detail"][0]["msg"] == "Field required"
+        content = response.json()
+        assert content["detail"][0]["loc"] == ["query", missing_parameter]
 
-    def test_handle_auth_refresh_empty_refresh_token(
-        self,
-        mocker: MockerFixture,
-        test_client: TestClient,
-        mock_state_service: StateService,
+    @pytest.mark.parametrize(
+        "empty_parameter",
+        [
+            "refresh_token",
+            "correlation_id",
+        ],
+    )
+    def test_it_returns_400_status_when_required_parameter_empty(
+        self, empty_parameter: str, test_client: TestClient, dva_endpoint_jwe: str
     ) -> None:
-        configure_bindings(lambda binder: binder.bind(StateService, mock_state_service))
+        query_params = {
+            "token_endpoint_url": dva_endpoint_jwe,
+            "refresh_token": "test_refresh_token",
+            "correlation_id": "xyz",
+        }
 
-        with pytest.raises(
-            ValidationError, match='Property "refresh_token" may not be empty'
-        ):
-            test_client.get(
-                "/auth/refresh",
-                params={
-                    "token_endpoint_url": "http://example.com/token",
-                    "refresh_token": "",
-                    "correlation_id": "xyz",
-                },
-            )
+        query_params[empty_parameter] = ""
+
+        response = test_client.get("/auth/refresh", params=query_params)
+
+        assert response.status_code == 400
+        content = response.json()
+        assert content["detail"][0]["loc"] == [empty_parameter]

@@ -1,32 +1,27 @@
 name: "Setup app"
-description: "Installs Python and Poetry packages for an application in a given directory."
+description: "Sets up UV for an application in a given directory."
 inputs:
     app-dir:
         description: Path to Python application
+        required: true
+    github-token:
+        description: GitHub token for accessing private dependencies
         required: true
 runs:
     using: "composite"
 
     steps:
-        - name: Update PATH
-          shell: bash
-          run: echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-        - name: Install poetry
-          shell: bash
-          run: pip3 install poetry
-
-        - uses: actions/setup-python@v5
+        - name: Setup Python environment with uv
+          uses: astral-sh/setup-uv@v7
           with:
-              python-version: "3.11"
-              cache: poetry
+             enable-cache: true
+             python-version: "3.11"
 
-        - name: Set Poetry environment
+        - name: Configure Git to use GitHub token for private dependencies
           shell: bash
-          working-directory: ${{ inputs.app-dir }}
-          run: poetry env use 3.11
+          run: git config --global url.https://${{ inputs.github-token }}@github.com.insteadOf ssh://git@github.com
 
         - name: Install dependencies
           shell: bash
           working-directory: ${{ inputs.app-dir }}
-          run: poetry install --no-root --no-interaction --no-ansi
+          run: uv sync --locked

@@ -1,19 +1,21 @@
-from typing import Any, Dict
+from typing import Annotated, Any, Dict
 
 from fastapi import APIRouter, Depends, Response
 from fastapi.responses import JSONResponse
 
-from app.forwarding.models import DvaTarget
-from app.forwarding.signing.services import DvaTargetVerifier
+from app.authentication.middlewares import (
+    parsed_oauth_getstate_request,
+    parsed_oauth_refresh_request,
+)
 from app.utils import resolve_instance
 
 from .exceptions import AuthorizationHttpException
 from .models import (
     AccessTokenDTO,
-    GetStateRequest,
     GetStateResponse,
     OAuthCallbackRequest,
-    OAuthRefreshRequest,
+    ParsedGetStateRequest,
+    ParsedOAuthRefreshRequest,
     StateDTO,
 )
 from .responses import AuthorizationAccessTokenCallbackRedirectResponse
@@ -31,32 +33,23 @@ router = APIRouter(
 
 @router.post("/getstate")
 async def get_state(
-    request: GetStateRequest,
+    request: Annotated[ParsedGetStateRequest, Depends(parsed_oauth_getstate_request)],
     director: MedMijAuthRequestUrlDirector = resolve_instance(
         MedMijAuthRequestUrlDirector
     ),
-    dva_target_verifier: DvaTargetVerifier = resolve_instance(DvaTargetVerifier),
 ) -> GetStateResponse:
     """
     Generates an URL for the authorization request.
 
     Responses:
         200: Authorization URL successfully generated.
-        403: Forbidden. Invalid signature or disallowed target host.
+        400: Parsing DVA endpoint failed.
         422: Request validation failed.
         500: Internal server error.
-
-    Raises:
-        RequestValidationError: If the request validation fails.
-        Exception: For any other internal server errors.
-        HTTPException: If the signature is invalid or the target host is disallowed.
     """
-    for endpoint in [request.authorization_server_url, request.token_endpoint_url]:
-        dva_target: DvaTarget = DvaTarget.from_dva_target_url(str(endpoint))
-        await dva_target_verifier.verify(dva_target=dva_target)
 
     url: str = director.build_authorization_request_url(
-        authorization_server_url=request.authorization_server_url,
+        authorization_server_url=request.auth_endpoint_url,
         token_endpoint_url=request.token_endpoint_url,
         client_target_url=request.client_target_url,
         scope=request.medmij_scope,
@@ -67,7 +60,7 @@ async def get_state(
 
 @router.get("/auth/callback")
 async def handle_oauth_callback(
-    request: OAuthCallbackRequest = Depends(),
+    request: Annotated[OAuthCallbackRequest, Depends()],
     state_service: StateService = resolve_instance(StateService),
     token_service: MedMijOauthTokenService = resolve_instance(
         cls=MedMijOauthTokenService
@@ -127,17 +120,19 @@ async def handle_oauth_callback(
 
 @router.get("/auth/refresh")
 async def handle_auth_refresh(
-    refresh_request: OAuthRefreshRequest = Depends(),
+    request: Annotated[
+        ParsedOAuthRefreshRequest, Depends(parsed_oauth_refresh_request)
+    ],
     token_service: MedMijOauthTokenService = resolve_instance(
         cls=MedMijOauthTokenService
     ),
-    dva_target_verifier: DvaTargetVerifier = resolve_instance(DvaTargetVerifier),
 ) -> Response:
     """
     Handles the token refresh from the token server.
 
     Responses:
         200: Return new access token data.
+        400: Parsing DVA endpoint failed.
         403: Authorization failed.
         422: Request validation failed.
         500: Internal server error.
@@ -147,16 +142,10 @@ async def handle_auth_refresh(
         RequestValidationException: If the request validation fails.
         MedMijOAuthException: For any other internal authorization-related errors.
     """
-
-    dva_target: DvaTarget = DvaTarget.from_dva_target_url(
-        str(refresh_request.token_endpoint_url)
-    )
-    await dva_target_verifier.verify(dva_target=dva_target)
-
     access_token: AccessTokenDTO = await token_service.refresh_access_token(
-        token_server_uri=str(refresh_request.token_endpoint_url),
-        refresh_token=str(refresh_request.refresh_token),
-        correlation_id=str(refresh_request.correlation_id),
+        token_server_uri=str(request.token_endpoint_url),
+        refresh_token=str(request.refresh_token),
+        correlation_id=str(request.correlation_id),
     )
 
     return JSONResponse(content=access_token.model_dump())

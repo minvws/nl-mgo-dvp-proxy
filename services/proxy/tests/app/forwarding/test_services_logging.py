@@ -5,7 +5,6 @@ import pytest
 from fastapi import Request
 from httpx import Response as HttpxResponse
 from httpx import TimeoutException
-from inject import Binder
 from pydantic import AnyHttpUrl
 from pytest_mock import MockerFixture
 
@@ -13,7 +12,6 @@ from app.circuitbreaker.models import CircuitOpenException
 from app.circuitbreaker.services import CircuitBreakerService
 from app.forwarding.schemas import ForwardingRequest
 from app.forwarding.services import ForwardingService, RequestForwardingLogHandler
-from app.forwarding.signing.services import DvaTargetVerifier
 from app.medmij_logging.schemas import (
     ErrorData,
     ErrorLogMessage,
@@ -53,16 +51,8 @@ def make_forwarding_service(
 
 
 @pytest.fixture(autouse=True)
-def mock_dva_target_verifier(mocker: MockerFixture) -> Generator[None, None, None]:
-    """Configure (and later clear) the dependency bindings automatically."""
-
-    def bindings_override(binder: Binder) -> Binder:
-        dva_target_verifier = mocker.Mock(DvaTargetVerifier)
-        dva_target_verifier.verify = mocker.AsyncMock(side_effect=None)
-        binder.bind(DvaTargetVerifier, dva_target_verifier)
-        return binder
-
-    configure_bindings(bindings_override=bindings_override)
+def auto_configure_bindings() -> Generator[None, None, None]:
+    configure_bindings()
 
     yield
 
@@ -153,7 +143,9 @@ async def test_it_logs_resource_request_error_with_provided_error_context(
     )
 
     service = make_forwarding_service(circuit_breaker_mock, medmij_logger)
-    await service.get_resource(request=test_request, headers=test_headers)
+    await service.get_resource(
+        path=test_request.url.path, request=test_request, headers=test_headers
+    )
 
     assert medmij_logger_spy.call_count == 2  # type: ignore[attr-defined]
     log_message = medmij_logger_spy.call_args[0][0]  # type: ignore[attr-defined]
@@ -218,7 +210,9 @@ async def test_it_logs_resource_request_error_with_default_error_context(
     )
 
     service = make_forwarding_service(circuit_breaker_mock, medmij_logger)
-    await service.get_resource(request=test_request, headers=test_headers)
+    await service.get_resource(
+        path=test_request.url.path, request=test_request, headers=test_headers
+    )
 
     assert medmij_logger_spy.call_count == 2  # type: ignore[attr-defined]
     log_message = medmij_logger_spy.call_args[0][0]  # type: ignore[attr-defined]
@@ -251,7 +245,9 @@ async def test_it_logs_resource_error_response_on_request_timeout(
 
     with pytest.raises(Exception):
         service = make_forwarding_service(circuit_breaker_mock, medmij_logger)
-        await service.get_resource(request=test_request, headers=test_headers)
+        await service.get_resource(
+            path=test_request.url.path, request=test_request, headers=test_headers
+        )
 
     assert medmij_logger_spy.call_count == 2  # type: ignore[attr-defined]
     log_message = medmij_logger_spy.call_args[0][0]  # type: ignore[attr-defined]
@@ -287,7 +283,9 @@ async def test_it_logs_resource_error_response_on_other_error_responses(
     )
 
     service = make_forwarding_service(circuit_breaker_mock, medmij_logger)
-    await service.get_resource(request=test_request, headers=test_headers)
+    await service.get_resource(
+        path=test_request.url.path, request=test_request, headers=test_headers
+    )
 
     assert medmij_logger_spy.call_count == 2  # type: ignore[attr-defined]
     log_message = medmij_logger_spy.call_args[0][0]  # type: ignore[attr-defined]

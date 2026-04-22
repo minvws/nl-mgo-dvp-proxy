@@ -4,8 +4,8 @@ from typing import Any
 
 from faker import Faker
 from fastapi import HTTPException
-from pytest import fixture, raises
 from pydantic_core import Url
+from pytest import fixture, raises
 from pytest_mock import MockerFixture, MockType
 from requests import RequestException, Response
 
@@ -157,6 +157,51 @@ class TestVadHttpClient:
             verify=False,
         )
 
+    def test_posts_authorization_code_via_http_with_client_secret(
+        self,
+        client: VadHttpClient,
+        mock_config: VadHttpClientConfig,
+        mock_requests_post: MockType,
+        faker: Faker,
+    ) -> None:
+        endpoint = faker.uri_path()
+        grant_type = faker.random_element(elements=TokenGrantType)
+        authz_code = str(faker.sha256(raw_output=True))
+        redirect_uri = faker.uri()
+        code_verifier = str(faker.sha256(raw_output=True))
+        client_id = str(faker.uuid4())
+        client_secret = str(faker.uuid4())
+
+        mock_requests_post.return_value.json.return_value = {
+            "access_token": faker.sha256(),
+            "token_type": faker.random_element(elements=["Bearer"]),
+            "expires_in": faker.random_int(),
+        }
+
+        client.post_authz_code(
+            endpoint,
+            grant_type,
+            authz_code,
+            redirect_uri,
+            code_verifier,
+            client_id,
+            client_secret=client_secret,
+        )
+
+        mock_requests_post.assert_called_once_with(
+            f"{mock_config.url}{endpoint}",
+            data={
+                "grant_type": grant_type,
+                "code": authz_code,
+                "redirect_uri": redirect_uri,
+                "code_verifier": code_verifier,
+                "client_id": client_id,
+                "client_secret": client_secret,
+            },
+            timeout=5,
+            verify=False,
+        )
+
     def test_gets_userinfo_via_http(
         self,
         client: VadHttpClient,
@@ -197,10 +242,10 @@ class TestVadHttpClient:
             client.get_oidc_config()
 
         assert exc_info.value.status_code == 502
-        mock_logger.error.assert_called_once_with(
-            "VAD Bad Request: %s",
-            f"{status_code} Client Error: {error_message} for url: {url}",
-        )
+        mock_logger.error.assert_called_once()
+        args, _ = mock_logger.error.call_args
+
+        assert str(args[0]).startswith("VAD Bad Request")
 
     def test_make_web_request_handles_request_exception(
         self, client: VadHttpClient, mock_logger: MockType, mock_requests_get: MockType

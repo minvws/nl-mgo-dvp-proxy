@@ -2,4 +2,5 @@
 relative_files = True
 omit =
     app/bindings.py
+    app/seeders.py
     tests/*

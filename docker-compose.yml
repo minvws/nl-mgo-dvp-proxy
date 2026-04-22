@@ -4,14 +4,22 @@ services:
             context: ./services/proxy
             dockerfile: docker/Dockerfile
             args:
+                PROJECT_DIR: /src/services/proxy
                 NEW_UID: ${NEW_UID:-1000}
                 NEW_GID: ${NEW_GID:-1000}
+            ssh:
+                - default
+        environment:
+            - JWE_KEY_PATH=./secrets/dva_target
+            - JWT_SIGNING_KEY_PATH=./secrets/dva_target
         volumes:
-            - ./services/proxy:/src
-            - certs:/src/certs:ro
+            - .:/src
+            - /src/services/proxy/.venv
+            - certs:/src/services/proxy/certs:ro
         depends_on:
             - certsmanager
             - mock
+            - redis
         ports:
             - 8001:8001
         extra_hosts:
@@ -22,31 +30,29 @@ services:
             context: ./services/nl-mgo-dva-mock-private
             dockerfile: docker/Dockerfile
             args:
+                PROJECT_DIR: /src/services/nl-mgo-dva-mock-private
                 NEW_UID: ${NEW_UID:-1000}
                 NEW_GID: ${NEW_GID:-1000}
+        volumes:
+            - .:/src
+            - certs:/src/services/nl-mgo-dva-mock-private/certs:ro
         depends_on:
             - certsmanager
         ports:
             - 8002:443
-        volumes:
-            - ./services/nl-mgo-dva-mock-private:/src
-            - certs:/src/certs:ro
 
     certsmanager:
         build:
             context: ./services/certsmanager
-            args:
-                NEW_UID: ${NEW_UID:-1000}
-                NEW_GID: ${NEW_GID:-1000}
         volumes:
             - certs:/certs
 
     redis:
         image: redis:6.2
-        depends_on:
-            - certsmanager
         volumes:
             - certs:/src/certs:ro
+        depends_on:
+            - certsmanager
         command: >
             redis-server
                 --port 0
@@ -58,10 +64,10 @@ services:
         restart: unless-stopped
 
     jaeger:
-        image: jaegertracing/all-in-one:1.70.0
+        image: cr.jaegertracing.io/jaegertracing/jaeger:2.15.1
         ports:
-        - "16686:16686"
-        - "4317:4317"
+            - "16686:16686"
+            - "4317:4317"
 
 volumes:
     certs:

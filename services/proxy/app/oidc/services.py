@@ -2,14 +2,19 @@ from base64 import urlsafe_b64encode
 from hashlib import sha256
 from secrets import token_hex, token_urlsafe
 from time import time
-from typing import Any
-from urllib.parse import urlsplit
+from typing import Any, Dict
+from urllib.parse import urlencode, urlsplit
 
 from inject import autoparams
 from jwcrypto import jwk, jwt
 
-from app.config.models import OidcConfig
-from app.security.repositories import KeyStoreRepository
+from app.config.models import (
+    OidcClientAuth,
+    OidcClientJwtAuth,
+    OidcClientSecretAuth,
+    OidcConfig,
+)
+from app.security.repositories import JWKRepository
 from app.security.services import Encrypter
 
 from .clients import VadHttpClient
@@ -53,24 +58,24 @@ class PkceCodePairGenerator:
         encoded = urlsafe_b64encode(hashed)
 
         # Remove padding from b64 encoding
-        code_challenge = encoded.decode("ascii")[:-1]
+        code_challenge = encoded.decode("ascii").rstrip("=")
 
         return code_challenge
 
 
 class ClientAssertionJwtIssuer:
-    KEY_STORE_PVT_KEY_ID: str = "client_assertion_jwt_pvt_key"
-    KEY_STORE_PUB_KEY_ID: str = "client_assertion_jwt_pub_key"
+    KEY_STORE_PRIVATE_KEY_ID: str = "client_assertion_jwt_private_key"
+    KEY_STORE_PUBLIC_KEY_ID: str = "client_assertion_jwt_public_key"
     JWT_ALG: str = "RS256"
     DEFAULT_JWT_EXP = 60
     DEFAULT_JWT_NBF = 10
 
-    @autoparams("key_store_repository")
+    @autoparams("jwk_repository")
     def __init__(
         self,
-        key_store_repository: KeyStoreRepository,
+        jwk_repository: JWKRepository,
     ):
-        self.__key_store_repository = key_store_repository
+        self.__jwk_repository = jwk_repository
         self.__private_key: jwk.JWK | None = None
         self.__public_key: jwk.JWK | None = None
 
@@ -98,18 +103,16 @@ class ClientAssertionJwtIssuer:
 
     def __get_private_key(self) -> jwk.JWK:
         if self.__private_key is None:
-            self.__private_key = jwk.JWK.from_pem(
-                self.__key_store_repository.get_key_store(self.KEY_STORE_PVT_KEY_ID)[0],
-                password=None,
+            self.__private_key = self.__jwk_repository.get_first_key_from_store(
+                self.KEY_STORE_PRIVATE_KEY_ID
             )
 
         return self.__private_key
 
     def __get_public_key(self) -> jwk.JWK:
         if self.__public_key is None:
-            self.__public_key = jwk.JWK.from_pem(
-                self.__key_store_repository.get_key_store(self.KEY_STORE_PUB_KEY_ID)[0],
-                password=None,
+            self.__public_key = self.__jwk_repository.get_first_key_from_store(
+                self.KEY_STORE_PUBLIC_KEY_ID
             )
 
         return self.__public_key
@@ -145,35 +148,37 @@ class VadAuthorizationUrlProvider:
         )
         encrypted_state = self.__encrypter.encrypt(state.model_dump_json())
 
-        return (
-            "%s?response_type=%s&client_id=%s&redirect_uri=%s&scope=%s&state=%s&code_challenge=%s&code_challenge_method=%s&nonce=%s"
-            % (
-                authz_endpoint,
-                VAD_OIDC_RESPONSE_TYPE,
-                self.__client_id,
-                self.__callback_url,
-                VAD_OIDC_SCOPE,
-                encrypted_state,
-                code_challenge,
-                VAD_OIDC_CODE_CHALLENGE_METHOD,
-                token_hex(16),
-            )
+        query_params = urlencode(
+            {
+                "response_type": VAD_OIDC_RESPONSE_TYPE,
+                "client_id": self.__client_id,
+                "redirect_uri": self.__callback_url,
+                "scope": VAD_OIDC_SCOPE,
+                "state": encrypted_state,
+                "code_challenge": code_challenge,
+                "code_challenge_method": VAD_OIDC_CODE_CHALLENGE_METHOD,
+                "nonce": token_hex(16),
+            }
         )
+
+        return f"{authz_endpoint}?{query_params}"
 
 
 class VadUserinfoProvider:
-    @autoparams("config", "vad_oidc_repository", "vad_http_client", "jwt_issuer")
+    @autoparams("oidc_config", "vad_oidc_repository", "vad_http_client", "jwt_issuer")
     def __init__(
         self,
         base_url: str,
-        config: OidcConfig,
+        oidc_config: OidcConfig,
+        oidc_client_auth_config: OidcClientAuth,
         vad_oidc_repository: VadOidcConfigRepository,
         vad_http_client: VadHttpClient,
         jwt_issuer: ClientAssertionJwtIssuer,
     ):
-        self.__client_id: str = config.client_id
+        self.__oidc_client_auth_config = oidc_client_auth_config
+        self.__client_id: str = oidc_config.client_id
         self.__callback_url: str = (
-            base_url.rstrip("/") + "/" + config.callback_endpoint.lstrip("/")
+            base_url.rstrip("/") + "/" + oidc_config.callback_endpoint.lstrip("/")
         )
         self.__vad_oidc_config_repository = vad_oidc_repository
         self.__vad_http_client = vad_http_client
@@ -185,9 +190,21 @@ class VadUserinfoProvider:
         token_url = vad_oidc_config.token_endpoint
         userinfo_endpoint = urlsplit(vad_oidc_config.userinfo_endpoint).path
 
-        client_assertion_jwt = self.__jwt_issuer.create(
-            {"iss": self.__client_id, "sub": self.__client_id, "aud": token_url}
-        )
+        token_request_auth_params: Dict[str, Any] = {}
+
+        if isinstance(self.__oidc_client_auth_config, OidcClientSecretAuth):
+            token_request_auth_params["client_secret"] = (
+                self.__oidc_client_auth_config.client_secret
+            )
+        elif isinstance(self.__oidc_client_auth_config, OidcClientJwtAuth):
+            client_assertion_jwt = self.__jwt_issuer.create(
+                {"iss": self.__client_id, "sub": self.__client_id, "aud": token_url}
+            )
+
+            token_request_auth_params["client_assertion_type"] = (
+                VAD_OIDC_CLIENT_ASSERTION_TYPE
+            )
+            token_request_auth_params["client_assertion"] = str(client_assertion_jwt)
 
         token_response = self.__vad_http_client.post_authz_code(
             endpoint=token_endpoint,
@@ -196,8 +213,7 @@ class VadUserinfoProvider:
             redirect_uri=self.__callback_url,
             code_verifier=state.code_verifier,
             client_id=self.__client_id,
-            client_assertion=str(client_assertion_jwt),
-            client_assertion_type=VAD_OIDC_CLIENT_ASSERTION_TYPE,
+            **token_request_auth_params,
         )
 
         userinfo_response = self.__vad_http_client.get_userinfo(

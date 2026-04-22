@@ -1,5 +1,60 @@
 - ### NEXT FUTURE RELEASE
 
+- ## [0.18.1]
+
+    - No changes required
+
+- ## [0.18.0]
+
+    ### Added:
+    - `[dva_target]` section
+    - New config keys for existing `[dva_target]` section:
+        - `jwe_encryption_private_key=<path_to_key>`
+            - see `mgo-dvp-proxy:98b1bc97-09a8-4fe2-8a7b-6b655d8ddbc1` in `pki_overview.json`
+        - `jwt_signing_public_key=<path_to_key>`
+            - see `mgo-localization:91c0c8d4-0c53-4c2c-8291-4c6a1b8e017e` in `pki_overview.json`
+
+    ### Updated:
+
+    - The following config keys were renamed in section `[oidc_client_auth]`:
+      - `client_assertion_jwt_private_key_path` (previously `client_assertion_jwt_pvt_key_path`)
+        - optional (required only when `type=private_key_jwt`)
+      - `client_assertion_jwt_public_key_path` (previously `client_assertion_jwt_pub_key_path`)
+        - optional (required only when `type=private_key_jwt`)
+
+    - Refactored the tool script `tools/generate-client-assertion-jwt-key-pair.py`:
+        - The filename has changed to `tools/generate-key-pair.py`
+        - It now accepts three additional flags:
+            - `--type`: optional, supported values are `RSA` and `EC` (default: `RSA`)
+            - `--name`: optional, name for both private/public key (default: `proxy`)
+            - `--path`: optional, path for both private/public key (default: `services/proxy/secrets`)
+
+    ### Removed:
+
+    - `[signature_validation]` section
+
+- ### [0.17.0]
+
+    ### Added:
+
+    - Add optional `[outbound_proxy]` section for configuring a proxy for outbound HTTP requests:
+        - proxy_url (optional)
+            - string
+            - default: None
+            - example: http://proxy.example:8080
+
+- ### [0.16.0]
+
+    ### Added:
+    - Add new `[oidc_client_auth]` section. It should contain the following settings:
+      - type=client_secret_post
+      - client_secret=<client_secret> (@see `oidc.client_secret`)
+
+    ### Removed:
+    - Remove the following settings from the `[oidc]` section (they have been moved to the new above-mentioned section, but not required here since we use "client_secret_post"):
+      - client_assertion_jwt_pvt_key_path
+      - client_assertion_jwt_pub_key_path
+
 - ### [0.15.0]
 
     - Add `forwarding` section to config

@@ -2,7 +2,6 @@ import base64
 import os
 import time
 import uuid
-from urllib.parse import quote
 
 import faker
 import inject
@@ -350,7 +349,7 @@ class TestMedMijAuthRequestUrlDirector:
         director: MedMijAuthRequestUrlDirector = create_medmij_oauth_url_director
         test_url = "https://example.com"
         redirect_uri = "https://example.com/callback"
-        encoded_redirect_uri: str = quote(string=redirect_uri)
+        encoded_redirect_uri: str = "https%3A%2F%2Fexample.com%2Fcallback"
         token_endpoint_url = "https://example.com/token"
 
         director.add_redirect_uri()

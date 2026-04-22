@@ -7,7 +7,7 @@ from pytest import fixture, raises
 from pytest_mock import MockerFixture, MockType
 
 from app.security.exceptions import CouldNotDecryptPayload
-from app.security.repositories import KeyStoreRepository
+from app.security.repositories import SecretRepository
 from app.security.services import FernetEncrypter, SslContextFactory
 
 
@@ -16,28 +16,29 @@ class TestFernetEncrypter:
     def mocks(
         self, mocker: MockerFixture
     ) -> tuple[FernetEncrypter, MockType, MockType]:
-        mock_key_store_repository = mocker.Mock(KeyStoreRepository)
+        mock_secret_repository = mocker.Mock(SecretRepository)
         mock_logger = mocker.Mock()
 
-        fernet_encrypter = FernetEncrypter(mock_key_store_repository, mock_logger)
+        fernet_encrypter = FernetEncrypter(mock_secret_repository, mock_logger)
 
-        return (fernet_encrypter, mock_key_store_repository, mock_logger)
+        return (fernet_encrypter, mock_secret_repository, mock_logger)
 
     def test_encrypt_returns_decryptable_ciphertext(
         self, mocks: tuple[FernetEncrypter, MockType, MockType]
     ) -> None:
         (
             fernet_encrypter,
-            mock_key_store_repository,
+            mock_secret_repository,
             _,
         ) = mocks
         secret_key = self.__generate_secret_key()
 
-        mock_key_store_repository.get_key_store.return_value = [secret_key]
+        mock_secret_repository.get_first_key_from_store.return_value = secret_key
+        mock_secret_repository.get_key_store.return_value = [secret_key]
 
         ciphertext = fernet_encrypter.encrypt("payload")
 
-        mock_key_store_repository.get_key_store.assert_called_once_with(
+        mock_secret_repository.get_first_key_from_store.assert_called_once_with(
             FernetEncrypter.KEY_STORE_ID
         )
         assert fernet_encrypter.decrypt(ciphertext) == "payload"
@@ -45,11 +46,11 @@ class TestFernetEncrypter:
     def test_decrypt_raises_error_when_ciphertext_could_not_be_decrypted(
         self, mocks: tuple[FernetEncrypter, MockType, MockType]
     ) -> None:
-        fernet_encrypter, mock_key_store_repository, _ = mocks
+        fernet_encrypter, mock_secret_repository, _ = mocks
         first_wrong_secret_key = self.__generate_secret_key()
         second_wrong_secret_key = self.__generate_secret_key()
 
-        mock_key_store_repository.get_key_store.return_value = [
+        mock_secret_repository.get_key_store.return_value = [
             first_wrong_secret_key,
             second_wrong_secret_key,
         ]
@@ -60,13 +61,16 @@ class TestFernetEncrypter:
     def test_decrypt_logs_invalid_token_exception_as_warning(
         self, mocks: tuple[FernetEncrypter, MockType, MockType]
     ) -> None:
-        fernet_encrypter, mock_key_store_repository, mock_logger = mocks
+        fernet_encrypter, mock_secret_repository, mock_logger = mocks
         wrong_secret_key = self.__generate_secret_key()
         correct_secret_key = self.__generate_secret_key()
 
-        mock_key_store_repository.get_key_store.side_effect = [
-            [correct_secret_key],
-            [wrong_secret_key, correct_secret_key],
+        mock_secret_repository.get_first_key_from_store.return_value = (
+            correct_secret_key
+        )
+        mock_secret_repository.get_key_store.return_value = [
+            wrong_secret_key,
+            correct_secret_key,
         ]
         ciphertext = fernet_encrypter.encrypt("payload")
 
