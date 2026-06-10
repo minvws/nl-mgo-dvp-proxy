@@ -8,7 +8,7 @@ dependencies = [
     "fastapi>=0.125,<0.130",
     "requests>=2.32,<3",
     "statsd>=4.0,<5",
-    "cryptography>=46.0,<47",
+    "cryptography>=46.0.7,<47",
     "inject>=5.3,<6",
     "httpx>=0.28,<0.29",
     "opentelemetry-instrumentation-fastapi==0.60b1",
@@ -19,12 +19,15 @@ dependencies = [
     "jwcrypto>=1.5.6,<2",
     "python-json-logger>=4.0.0,<5",
     "async-timeout>=5.0.1,<6",
+    "typer>=0.19.2,<0.20",
+    "xmlschema>=3.4.3,<4",
     "mgo-healthchecker[redis]",
+    "nl-mgo-keystore-repository",
 ]
 
 [dependency-groups]
 dev = [
-    "pytest>=9.0,<10",
+    "pytest>=9.0.3,<10",
     "pytest-cov>=7.0,<8",
     "pytest-mock>=3.15,<4",
     "pytest-asyncio>=1.2,<2",
@@ -41,14 +44,16 @@ dev = [
 ]
 
 [build-system]
-requires = ["uv_build>=0.9.30,<0.10.0"]
+requires = ["uv_build>=0.9.30,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv]
+default-groups = "all"
 package = false
 
 [tool.uv.sources]
-mgo-healthchecker = { git = "ssh://git@github.com/minvws/nl-mgo-package-healthchecker-private.git", tag = "v0.1.0" }
+mgo-healthchecker = { git = "https://git@github.com/minvws/nl-mgo-package-healthchecker.git", tag = "v0.1.0" }
+nl-mgo-keystore-repository = { git = "https://github.com/minvws/nl-mgo-keystore-repository.git", tag = "v0.1.0" }
 
 [tool.ruff]
 cache-dir = "~/.cache/ruff"

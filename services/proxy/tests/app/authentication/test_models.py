@@ -3,7 +3,7 @@ from typing import Any, Dict
 import pytest
 from pydantic import ValidationError
 
-from app.authentication.models import AccessTokenDTO, StateDTO
+from app.authentication.models import AccessTokenDTO
 
 
 def test_access_token_dto_valid() -> None:
@@ -46,28 +46,3 @@ def test_access_token_dto_empty_field() -> None:
         ValidationError, match='Property "access_token" may not be empty'
     ):
         AccessTokenDTO(**data)
-
-
-def test_state_dto_from_dict_with_expiration_time_string() -> None:
-    state_dto = StateDTO.from_dict(
-        {
-            "expiration_time": "123",
-            "correlation_id": "123",
-            "token_endpoint_url": "https://example.com/token",
-            "client_target_url": "https://example.com/callback",
-        }
-    )
-
-    assert state_dto.expiration_time == 123
-
-
-def test_state_dto_from_dict_with_expiration_time_none() -> None:
-    state_dto = StateDTO.from_dict(
-        {
-            "correlation_id": "123",
-            "token_endpoint_url": "https://example.com/token",
-            "client_target_url": "https://example.com/callback",
-        }
-    )
-
-    assert state_dto.expiration_time == None

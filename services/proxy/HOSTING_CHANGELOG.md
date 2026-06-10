@@ -1,5 +1,37 @@
 - ### NEXT FUTURE RELEASE
 
+...
+
+- ### [0.19.0]
+
+    ### Changed:
+
+        - `oauth_tls` section renamed to `medmij_tls`
+        - MedMij mTLS configuration for OAuth and whitelist pulls.
+        - Required for real MedMij token requests (unless `oauth.mock_oauth_servers=true`) and whitelist pulls.
+
+    ### Added:
+
+        - `[medmij_whitelist]` section
+        - `url`
+            - URL of the MedMij whitelist XML source.
+            - Production: `https://register.medmij.nl/MedMij_Whitelist.xml?api=2`
+            - Acceptance: `https://services.interoplab.nl/MedMij_Whitelist.xml?api=2`
+            - Example: `https://afsprakenstelsel.medmij.nl/__attachments/335938893/MedMij_Whitelist_example.9.2.xml`
+        - `pull_max_retries`
+            - Maximum number of retry attempts when pulling the MedMij whitelist.
+            - Default: `10`
+        - `pull_initial_backoff_secs`
+            - Initial backoff in seconds before retrying a failed whitelist pull.
+            - Default: `0.5`
+        - `pull_backoff_factor`
+            - Multiplier applied to the backoff delay for each subsequent whitelist pull retry.
+            - Default: `2.0`
+        - Typer CLI command for periodic whitelist refresh:
+        - `python -m app.medmij.cli pull-whitelist`
+        - Suggested cron schedule (every 10 minutes):
+        - `*/10 * * * * cd /src && python -m app.medmij.cli pull-whitelist`
+
 - ## [0.18.1]
 
     - No changes required
@@ -7,6 +39,7 @@
 - ## [0.18.0]
 
     ### Added:
+
     - `[dva_target]` section
     - New config keys for existing `[dva_target]` section:
         - `jwe_encryption_private_key=<path_to_key>`

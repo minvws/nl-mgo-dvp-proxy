@@ -6,7 +6,8 @@ from pytest_mock import MockerFixture
 
 from app.authentication.adapters import MedMijOauthTokenAdapter, MockedOauthTokenAdapter
 from app.authentication.exceptions import AuthorizationHttpException
-from app.authentication.models import AccessTokenDTO, AsyncOAuthClient
+from app.authentication.models import AccessTokenDTO
+from app.http_client.clients import AsyncPkioMTLSClient
 from tests.utils import configure_bindings
 
 ACCESS_TOKEN: str = "access-token"
@@ -38,14 +39,14 @@ def mock_response(
 
 
 @pytest.fixture
-def mock_client(mocker: MockerFixture) -> AsyncOAuthClient:
-    mock_client: AsyncOAuthClient = mocker.AsyncMock(spec=AsyncOAuthClient)
+def mock_client(mocker: MockerFixture) -> AsyncPkioMTLSClient:
+    mock_client: AsyncPkioMTLSClient = mocker.AsyncMock(spec=AsyncPkioMTLSClient)
     return mock_client
 
 
 @pytest.fixture
 def token_adapter_mock(
-    mock_client: AsyncOAuthClient,
+    mock_client: AsyncPkioMTLSClient,
     mock_response: Response,
     mocker: MockerFixture,
 ) -> MedMijOauthTokenAdapter:
@@ -108,7 +109,7 @@ class TestMedMijOauthTokenAdapter:
         self,
         test_client: TestClient,
         mock_response: Response,
-        mock_client: AsyncOAuthClient,
+        mock_client: AsyncPkioMTLSClient,
         token_adapter_mock: MedMijOauthTokenAdapter,
         mocker: MockerFixture,
     ) -> None:
@@ -135,7 +136,7 @@ class TestMedMijOauthTokenAdapter:
     async def test_get_access_token_fails_with_a_405_error(
         self,
         mock_response: Response,
-        mock_client: AsyncOAuthClient,
+        mock_client: AsyncPkioMTLSClient,
         token_adapter_mock: MedMijOauthTokenAdapter,
         mocker: MockerFixture,
     ) -> None:
@@ -158,7 +159,7 @@ class TestMedMijOauthTokenAdapter:
     @pytest.mark.asyncio
     async def test_get_access_token_fails_with_a_connect_timeout(
         self,
-        mock_client: AsyncOAuthClient,
+        mock_client: AsyncPkioMTLSClient,
         token_adapter_mock: MedMijOauthTokenAdapter,
         mocker: MockerFixture,
     ) -> None:
@@ -177,7 +178,7 @@ class TestMedMijOauthTokenAdapter:
     async def test_get_access_token_post_uses_data_not_params_is_successful(
         self,
         token_adapter_mock: MedMijOauthTokenAdapter,
-        mock_client: AsyncOAuthClient,
+        mock_client: AsyncPkioMTLSClient,
     ) -> None:
         await token_adapter_mock.get_access_token(
             token_server_uri="https://example.com",

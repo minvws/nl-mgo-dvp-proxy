@@ -6,23 +6,24 @@ from app.forwarding.constants import (
     MEDMIJ_REQUEST_ID_HEADER,
     MEDMIJ_CORRELATION_ID_HEADER,
 )
+from app.http_client.clients import AsyncPkioMTLSClient
 
 from .exceptions import AuthorizationHttpException
 from .interfaces import OauthTokenAdapter
-from .models import AccessTokenDTO, AsyncOAuthClient
+from .models import AccessTokenDTO
 
 
 class MedMijOauthTokenAdapter(OauthTokenAdapter):
     GRANT_TYPE_ACCESS_TOKEN: str = "authorization_code"
     GRANT_TYPE_REFRESH_TOKEN: str = "refresh_code"
 
-    @inject.autoparams()
+    @inject.autoparams("client")
     def __init__(
-        self, client_id: str, redirect_uri: str, client: AsyncOAuthClient
+        self, client_id: str, redirect_uri: str, client: AsyncPkioMTLSClient
     ) -> None:
         self.client_id = client_id
         self.redirect_uri = redirect_uri
-        self.client: AsyncOAuthClient = client
+        self.client: AsyncPkioMTLSClient = client
 
     async def __request_token_server(
         self,

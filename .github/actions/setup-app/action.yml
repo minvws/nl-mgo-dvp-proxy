@@ -17,10 +17,6 @@ runs:
              enable-cache: true
              python-version: "3.11"
 
-        - name: Configure Git to use GitHub token for private dependencies
-          shell: bash
-          run: git config --global url.https://${{ inputs.github-token }}@github.com.insteadOf ssh://git@github.com
-
         - name: Install dependencies
           shell: bash
           working-directory: ${{ inputs.app-dir }}

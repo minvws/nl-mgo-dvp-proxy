@@ -3,6 +3,8 @@ import logging
 import inject
 from pytest import CaptureFixture
 
+from app.forwarding.client import RetryingAsyncClient, RetryingSyncClient
+from app.http_client.clients import AsyncPkioMTLSClient, SyncPkioMTLSClient
 from tests.utils import clear_bindings, configure_bindings, load_app_config
 
 
@@ -28,5 +30,17 @@ def test_logger_writes_output_to_console(capfd: CaptureFixture[str]) -> None:
     logger.debug(test_message)
 
     assert test_message in capfd.readouterr().out
+
+    clear_bindings()
+
+
+def test_pkio_mtls_clients_are_resolved_as_retrying_clients() -> None:
+    configure_bindings()
+
+    async_client = inject.instance(AsyncPkioMTLSClient)
+    sync_client = inject.instance(SyncPkioMTLSClient)
+
+    assert isinstance(async_client, RetryingAsyncClient)
+    assert isinstance(sync_client, RetryingSyncClient)
 
     clear_bindings()

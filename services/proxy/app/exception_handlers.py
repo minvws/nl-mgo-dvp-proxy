@@ -6,6 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.status import (
     HTTP_400_BAD_REQUEST,
+    HTTP_403_FORBIDDEN,
     HTTP_500_INTERNAL_SERVER_ERROR,
 )
 
@@ -18,6 +19,8 @@ from app.authentication.responses import (
     OAuthFailureResponse,
     RequestValidationFailedResponse,
 )
+from app.medmij.exceptions import WhitelistError
+from app.security.dva_target.exceptions import DvaTargetAssertionError
 
 
 class ExceptionHandlers:
@@ -48,6 +51,37 @@ class ExceptionHandlers:
             return JSONResponse(
                 status_code=HTTP_400_BAD_REQUEST,
                 content={"status_code": HTTP_400_BAD_REQUEST, "detail": str(exc)},
+            )
+
+        @app.exception_handler(DvaTargetAssertionError)
+        @inject.autoparams("logger")
+        async def dva_target_assertion_error_handler(
+            request: Request, exc: DvaTargetAssertionError, logger: Logger
+        ) -> JSONResponse:
+            logger.debug(
+                "Failed to parse JWE endpoint in context: %s", exc.error_context
+            )
+
+            return JSONResponse(
+                content={
+                    "message": "Failed to parse JWE endpoint",
+                    "context": exc.error_context,
+                },
+                status_code=HTTP_400_BAD_REQUEST,
+            )
+
+        @app.exception_handler(WhitelistError)
+        @inject.autoparams("logger")
+        async def whitelist_error_handler(
+            request: Request, exc: WhitelistError, logger: Logger
+        ) -> JSONResponse:
+            logger.info("Request blocked due to whitelist error", exc_info=exc)
+
+            return JSONResponse(
+                content={
+                    "detail": "Request blocked due to whitelist error",
+                },
+                status_code=HTTP_403_FORBIDDEN,
             )
 
         @app.exception_handler(AuthorizationHttpException)

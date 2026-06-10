@@ -7,7 +7,7 @@ from pytest_mock import MockerFixture
 
 from app.circuitbreaker.models import Circuit, CircuitOpenException, CircuitState
 from app.circuitbreaker.repositories import InMemoryCircuitStateRepository
-from app.circuitbreaker.services import CircuitBreakerService
+from app.circuitbreaker.services import CircuitBreaker
 
 
 @pytest.fixture
@@ -20,7 +20,7 @@ def circuit_breaker(
     mocker: MockerFixture,
     repository: InMemoryCircuitStateRepository,
 ) -> Any:
-    return CircuitBreakerService(
+    return CircuitBreaker(
         repository,
         mocker.Mock(Logger),
         fail_max=3,
@@ -48,7 +48,7 @@ def open_circuit(repository: InMemoryCircuitStateRepository) -> Circuit:
 
 @pytest.mark.asyncio
 async def test_circuit_breaker_success(
-    mocker: Any, circuit_breaker: CircuitBreakerService, closed_circuit: Circuit
+    mocker: Any, circuit_breaker: CircuitBreaker, closed_circuit: Circuit
 ) -> None:
     url = closed_circuit.id
     func = mocker.AsyncMock(return_value="Success")
@@ -63,7 +63,7 @@ async def test_circuit_breaker_success(
 
 @pytest.mark.asyncio
 async def test_circuit_breaker_failure(
-    mocker: Any, circuit_breaker: CircuitBreakerService, closed_circuit: Circuit
+    mocker: Any, circuit_breaker: CircuitBreaker, closed_circuit: Circuit
 ) -> None:
     url = closed_circuit.id
     func = mocker.AsyncMock(side_effect=Exception("Error"))
@@ -78,7 +78,7 @@ async def test_circuit_breaker_failure(
 
 @pytest.mark.asyncio
 async def test_circuit_breaker_opens_after_failures(
-    mocker: Any, circuit_breaker: CircuitBreakerService, closed_circuit: Circuit
+    mocker: Any, circuit_breaker: CircuitBreaker, closed_circuit: Circuit
 ) -> None:
     url = closed_circuit.id
     func = mocker.AsyncMock(side_effect=Exception("Error"))
@@ -94,7 +94,7 @@ async def test_circuit_breaker_opens_after_failures(
 
 @pytest.mark.asyncio
 async def test_circuit_breaker_resets_after_success(
-    mocker: Any, circuit_breaker: CircuitBreakerService, closed_circuit: Circuit
+    mocker: Any, circuit_breaker: CircuitBreaker, closed_circuit: Circuit
 ) -> None:
     url = closed_circuit.id
     failing_func = mocker.AsyncMock(side_effect=Exception("Error"))
@@ -115,7 +115,7 @@ async def test_circuit_breaker_resets_after_success(
 
 @pytest.mark.asyncio
 async def test_circuit_breaker_open_state_can_attempt_reset(
-    mocker: Any, circuit_breaker: CircuitBreakerService, open_circuit: Circuit
+    mocker: Any, circuit_breaker: CircuitBreaker, open_circuit: Circuit
 ) -> None:
     url = open_circuit.id
     func = mocker.AsyncMock(return_value="Success")
@@ -135,7 +135,7 @@ async def test_circuit_breaker_open_state_can_attempt_reset(
 
 @pytest.mark.asyncio
 async def test_circuit_breaker_open_state_cannot_attempt_reset(
-    mocker: Any, circuit_breaker: CircuitBreakerService, open_circuit: Circuit
+    mocker: Any, circuit_breaker: CircuitBreaker, open_circuit: Circuit
 ) -> None:
     url = open_circuit.id
     func = mocker.AsyncMock()
@@ -156,7 +156,7 @@ async def test_circuit_breaker_open_state_cannot_attempt_reset(
 
 @pytest.mark.asyncio
 async def test_circuit_breaker_raises_exception_on_open_circuit(
-    mocker: Any, circuit_breaker: CircuitBreakerService, open_circuit: Circuit
+    mocker: Any, circuit_breaker: CircuitBreaker, open_circuit: Circuit
 ) -> None:
     url = open_circuit.id
     open_circuit.last_failure_time = time.time()

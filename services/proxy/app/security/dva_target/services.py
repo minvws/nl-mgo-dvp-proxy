@@ -1,32 +1,32 @@
 import json
 import logging
 import time
-from typing import Set
+from typing import Any, Final, Set
 from urllib.parse import urlsplit
 
 from jwcrypto.common import JWException
 from jwcrypto.jwe import JWE
 from jwcrypto.jwt import JWT
+from mgo_keystore_repositories import JWKRepository
 
 from app.security.dva_target.exceptions import (
     JWEDecryptError,
     JWTClaimsError,
     JWTValidationError,
 )
-from app.security.repositories import JWKRepository
 
 logger = logging.getLogger(__name__)
 
 
 class DvaTargetAssertionParser:
-    JWE_DECRYPTION_KID: str = "jwe_decryption_kid"
-    JWT_SIGNATURE_VALIDATION_KID: str = "jwt_signature_validation_kid"
+    JWE_DECRYPTION_KID: Final[str] = "jwe_decryption_kid"
+    JWT_SIGNATURE_VALIDATION_KID: Final[str] = "jwt_signature_validation_kid"
 
     def __init__(self, jwk_repository: JWKRepository, blocklist: Set[str]) -> None:
         self.__jwk_repository = jwk_repository
         self.__blocklist = blocklist
 
-    def parse(self, serialized_jwe: str) -> str:
+    def parse(self, serialized_jwe: str, error_context: dict[str, Any]) -> str:
         """
         Parser service to extract and validate the DVA target URL from a serialized JWE containing a signed JWT as payload.
         The extraction is done in the following steps:
@@ -36,7 +36,12 @@ class DvaTargetAssertionParser:
         4. Assert the DVA target URL is not on the blocklist
 
         :param serialized_jwe: serialized JWE containing a signed JWT with the DVA target URL as claim
+        :param error_context: Any contextual data to be logged and returned in the API response
         :return: plain DVA target URL extracted from the JWE
+
+        :raises JWEDecryptError: if JWE deserialization or decryption fails
+        :raises JWTValidationError: if JWT signature or claim validation fails
+        :raises JWTClaimsError: if required claims are missing, invalid, or blocked
         """
         try:
             jwe = JWE()
@@ -49,7 +54,10 @@ class DvaTargetAssertionParser:
             serialized_jwt = jwe.payload.decode("utf-8")
         except JWException as exc:
             logger.error("Encountered error during JWE decryption: %s", exc)
-            raise JWEDecryptError(str(exc)) from exc
+            raise JWEDecryptError(
+                str(exc),
+                error_context=error_context,
+            ) from exc
 
         now = int(time.time())
         jwt_signature_validation_key = self.__jwk_repository.get_first_key_from_store(
@@ -71,20 +79,29 @@ class DvaTargetAssertionParser:
             jwt.validate(jwt_signature_validation_key)
         except JWException as exc:
             logger.error("Encountered error during JWT validation: %s", exc)
-            raise JWTValidationError(str(exc)) from exc
+            raise JWTValidationError(str(exc), error_context=error_context) from exc
 
         try:
-            dva_target_url: str = json.loads(jwt.claims)["url"]
+            dva_target_url = json.loads(jwt.claims)["url"]
         except KeyError as exc:
-            raise JWTClaimsError("Missing 'url' claim in JWT") from exc
+            raise JWTClaimsError(
+                "Missing 'url' claim in JWT",
+                error_context=error_context,
+            ) from exc
 
         if not isinstance(dva_target_url, str):
-            raise JWTClaimsError("The 'url' claim must be a string")
+            raise JWTClaimsError(
+                "The 'url' claim must be a string",
+                error_context=error_context,
+            )
 
         dva_target_hostname = urlsplit(dva_target_url).hostname or ""
         if dva_target_hostname in self.__blocklist:
             logger.warning("DVA target hostname blocked: %s", dva_target_hostname)
 
-            raise JWTClaimsError("The DVA target host is blocked")
+            raise JWTClaimsError(
+                "The DVA target host is blocked",
+                error_context=error_context,
+            )
 
         return dva_target_url

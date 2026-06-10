@@ -3,6 +3,7 @@ ifdef DOCKER
 else
   RUN_PREFIX :=
 endif
+COV_REPORT ?= term-missing
 
 .SILENT: help
 all: help
@@ -22,17 +23,20 @@ format-diff: ## Show formatting differences
 type-check: ## Check for typing errors
 	$(RUN_PREFIX) mypy
 
+clear-type-check-cache: ## Remove mypy cache
+	rm -rf ~/.cache/mypy
+
 spelling-check: ## Check spelling mistakes
 	$(RUN_PREFIX) codespell . -I.codespellignore
 
 spelling-fix: ## Fix spelling mistakes
 	$(RUN_PREFIX) codespell . .codespellignore --write-changes --interactive=3
 
-module-dependencies-check: ## Check cross-dependencies between modules  
+module-dependencies-check: ## Check cross-dependencies between modules
 	$(RUN_PREFIX) tach check -exact
 
 test: ## Runs automated tests with code coverage
-	$(RUN_PREFIX) pytest --cov --cov-fail-under=100 --cov-branch
+	$(RUN_PREFIX) pytest --cov --cov-fail-under=100 --cov-branch --cov-report=$(COV_REPORT)
 
 test-cov-xml: ## Runs automated tests with code coverage and exports a code coverage report to an XML file
 	$(RUN_PREFIX) pytest --cov --cov-fail-under=100 --cov-branch --cov-report=xml

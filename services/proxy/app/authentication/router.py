@@ -3,22 +3,20 @@ from typing import Annotated, Any, Dict
 from fastapi import APIRouter, Depends, Response
 from fastapi.responses import JSONResponse
 
-from app.authentication.middlewares import (
-    parsed_oauth_getstate_request,
-    parsed_oauth_refresh_request,
-)
 from app.utils import resolve_instance
 
 from .exceptions import AuthorizationHttpException
-from .models import (
-    AccessTokenDTO,
+from .middleware import (
+    parsed_oauth_getstate_request,
+    parsed_oauth_refresh_request,
+)
+from .schemas import (
+    AuthorizationAccessTokenCallbackRedirectResponse,
     GetStateResponse,
     OAuthCallbackRequest,
     ParsedGetStateRequest,
     ParsedOAuthRefreshRequest,
-    StateDTO,
 )
-from .responses import AuthorizationAccessTokenCallbackRedirectResponse
 from .services import (
     MedMijAuthRequestUrlDirector,
     MedMijOauthTokenService,
@@ -51,8 +49,8 @@ async def get_state(
     url: str = director.build_authorization_request_url(
         authorization_server_url=request.auth_endpoint_url,
         token_endpoint_url=request.token_endpoint_url,
-        client_target_url=request.client_target_url,
-        scope=request.medmij_scope,
+        client_target_url=request.payload.client_target_url,
+        scope=request.payload.medmij_scope,
     )
 
     return GetStateResponse(url_to_request=url)
@@ -99,10 +97,10 @@ async def handle_oauth_callback(
         raise AuthorizationHttpException(status_code=401, detail=error_detail)
 
     # Verify the state token. Exceptions are handled by the medmij_exception_handler
-    state_dto: StateDTO = state_service.decrypt_state_token(token=str(request.state))
+    state_dto = state_service.get_state_dto(token=str(request.state))
 
     # Request an access token using the authorization code
-    access_token: AccessTokenDTO = await token_service.retrieve_access_token(
+    access_token = await token_service.retrieve_access_token(
         token_server_uri=str(state_dto.token_endpoint_url),
         code=str(request.code),
         correlation_id=str(state_dto.correlation_id),
@@ -142,10 +140,10 @@ async def handle_auth_refresh(
         RequestValidationException: If the request validation fails.
         MedMijOAuthException: For any other internal authorization-related errors.
     """
-    access_token: AccessTokenDTO = await token_service.refresh_access_token(
+    access_token = await token_service.refresh_access_token(
         token_server_uri=str(request.token_endpoint_url),
-        refresh_token=str(request.refresh_token),
-        correlation_id=str(request.correlation_id),
+        refresh_token=str(request.payload.refresh_token),
+        correlation_id=str(request.payload.correlation_id),
     )
 
     return JSONResponse(content=access_token.model_dump())

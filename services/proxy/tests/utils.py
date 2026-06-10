@@ -1,7 +1,9 @@
-from typing import Callable
+import logging
+from typing import Callable, Tuple
 
 import inject
 from inject import Binder
+from pytest import LogCaptureFixture
 
 from app.bindings import configure_bindings as configure_app_bindings
 from app.config.models import AppConfig
@@ -38,3 +40,24 @@ def load_app_config() -> AppConfig:
 
     app_config: AppConfig = inject.instance(AppConfig)
     return app_config
+
+
+def assert_captured_logs(
+    caplog: LogCaptureFixture, expected: list[Tuple[str, int]]
+) -> None:
+    """
+    Helper to assert that each expected message appears in logs with correct severity.
+
+    Usage:
+        def test_example(caplog: LogCaptureFixture):
+            expected_logs = [
+                ("Process completed successfully", logging.INFO),
+                ("Warning: something minor happened", logging.WARNING),
+            ]
+            assert_captured_logs(caplog, expected_logs)
+    """
+    for msg, level in expected:
+        assert any(
+            msg in record.message and record.levelno == level
+            for record in caplog.records
+        ), f"Expected log '{msg}' with level {logging.getLevelName(level)}"

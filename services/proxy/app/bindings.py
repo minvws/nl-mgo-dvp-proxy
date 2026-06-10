@@ -3,13 +3,52 @@ import logging
 import logging.config
 from typing import List
 
-from httpx import AsyncClient
+import inject
+from httpx import AsyncClient, Client
 from inject import Binder
 from mgo_healthchecker.redis import RedisHealthChecker
 from mgo_healthchecker.utils import HealthCheckerCollection
+from mgo_keystore_repositories import (
+    FilesystemJWKRepository,
+    FilesystemSecretRepository,
+    JWKRepository,
+    SecretRepository,
+)
 from redis import Redis
 from statsd import StatsClient
 
+from app.circuitbreaker.services import CircuitBreaker
+from app.config.models import (
+    AppConfig,
+    InjectableConfig,
+    MetricAdapter,
+)
+from app.config.services import ConfigParser
+from app.forwarding.client import RetryingAsyncClient, RetryingSyncClient
+from app.forwarding.events import RequestFinished, RequestInit, RequestTimeout
+from app.forwarding.factories import (
+    MediaResourceGatewayHeaderFactory,
+    MinimalMediaResourceGatewayHeaderFactory,
+    OpenTelemetryMediaResourceGatewayHeaderFactory,
+)
+from app.http_client.clients import AsyncPkioMTLSClient, SyncPkioMTLSClient
+from app.http_client.factories import AsyncClientFactory, SyncClientFactory
+from app.medmij.repositories import (
+    FilesystemWhitelistXsdRepository,
+    RedisWhitelistRepository,
+    WhitelistRepository,
+    XsdRepository,
+)
+from app.medmij.services import MedMijWhitelistPuller
+from app.medmij_logging.factories import LogMessageFactory
+from app.medmij_logging.listeners import (
+    CreateMedMijLogEntryForRequestFinished,
+    CreateMedMijLogEntryForRequestInit,
+    CreateMedMijLogEntryForRequestTimeout,
+)
+from app.medmij_logging.services import MedMijLogger, WWWAuthenticateParser
+from app.metrics.clients import MetricClient, NoOpMetricClient
+from app.observer.services import EventManager
 from app.oidc.clients import VadHttpClient
 from app.oidc.repositories import (
     VadOidcConfigRepository,
@@ -20,18 +59,14 @@ from app.oidc.services import (
     VadUserinfoProvider,
 )
 from app.security.dva_target.services import DvaTargetAssertionParser
-from app.security.repositories import (
-    FilesystemJWKRepository,
-    FilesystemSecretRepository,
-    JWKRepository,
-    SecretRepository,
-)
 from app.security.services import Encrypter, FernetEncrypter, SslContextFactory
 from app.seeders import JWKRepositorySeeder, SecretRepositorySeeder
+from app.utils import root_path
+from app.version.models import VersionInfo
+from app.version.services import read_version_info
 
 from .authentication.adapters import MedMijOauthTokenAdapter, MockedOauthTokenAdapter
 from .authentication.interfaces import OauthTokenAdapter
-from .authentication.models import AsyncOAuthClient
 from .authentication.services import (
     MedMijAuthRequestUrlDirector,
     StateService,
@@ -42,21 +77,13 @@ from .circuitbreaker.repositories import (
     InMemoryCircuitStateRepository,
     RedisCircuitStateRepository,
 )
-from .circuitbreaker.services import CircuitBreakerService
-from .config.models import (
-    AppConfig,
-    InjectableConfig,
-    MetricAdapter,
-)
-from .config.services import ConfigParser
-from .forwarding.client import AsyncClientRetryDecorator
-from .http_client.factories import AsyncClientFactory
-from .medmij_logging.factories import LogMessageFactory
-from .medmij_logging.services import MedMijLogger
-from .metrics.clients import MetricClient, NoOpMetricClient
-from .utils import root_path
-from .version.models import VersionInfo
-from .version.services import read_version_info
+
+
+def ensure_bindings_configured(config_file: str = "app.conf") -> None:
+    if not inject.is_configured():
+        inject.configure(
+            lambda binder: configure_bindings(binder=binder, config_file=config_file),
+        )
 
 
 def configure_bindings(binder: Binder, config_file: str) -> None:
@@ -74,16 +101,23 @@ def configure_bindings(binder: Binder, config_file: str) -> None:
 
     __bind_metric_client(binder, app_config)
     __bind_async_client(binder, app_config)
-    __bind_async_oauth_client(binder, app_config)
+    __bind_async_pkio_mtls_client(binder, app_config)
+    __bind_sync_pkio_mtls_client(binder, app_config)
     __bind_circuit_breaker(binder, app_config)
     redis_client = __bind_redis_connection(binder, app_config)
     __bind_state_service(binder, app_config)
     __bind_medmij_oauth_auth_url_builder(binder, app_config)
     __bind_medmij_oauth_token_adapter(binder, app_config)
-    __bind_medmij_logging(binder, app_config)
+    __bind_medmij_whitelist_pull_service(binder, app_config)
+    __bind_whitelist_repository(binder)
+    __bind_whitelist_xsd_file_repo(binder)
+    medmij_logger, log_message_factory = __bind_medmij_logging(binder, app_config)
     __bind_security(binder, app_config)
     __bind_oidc(binder, app_config)
     __bind_health_checkers(binder, redis_client)
+    __bind_gateway(binder, app_config)
+
+    __bind_event_manager(binder, medmij_logger, log_message_factory)
 
 
 def __parse_app_config(config_file: str) -> AppConfig:
@@ -193,26 +227,83 @@ def __bind_metric_client(binder: Binder, app_config: AppConfig) -> None:
     binder.bind(MetricClient, metric_client)
 
 
-def __bind_async_client(
-    binder: Binder,
-    app_config: AppConfig,
-) -> None:
+def __bind_async_client(binder: Binder, app_config: AppConfig) -> None:
     async_client: AsyncClient = AsyncClientFactory.create(
         tls_config=app_config.tls, proxy_config=app_config.outbound_proxy
     )
 
     binder.bind_to_constructor(
         AsyncClient,
-        lambda: AsyncClientRetryDecorator(async_client=async_client),
+        lambda: RetryingAsyncClient(
+            async_client=async_client,
+            max_retries=app_config.retry.max_retries,
+            backoff=app_config.retry.backoff,
+            backoff_factor=app_config.retry.backoff_factor,
+        ),
     )
 
 
-def __bind_async_oauth_client(binder: Binder, app_config: AppConfig) -> None:
+def __bind_async_pkio_mtls_client(binder: Binder, app_config: AppConfig) -> None:
+    """
+    Binds a PKIO-Mtls specific AsyncClient with retry logic, these clients only operate in
+    the PKIO-Mtls context and are used for MedMij interactions. This client WILL NOT work for non-PKIO-Mtls interactions,
+    and will throw SSL errors when trying to do so.
+    """
     async_client: AsyncClient = AsyncClientFactory.create(
-        tls_config=app_config.oauth_tls, proxy_config=app_config.outbound_proxy
+        tls_config=app_config.medmij_tls, proxy_config=app_config.outbound_proxy
     )
 
-    binder.bind(AsyncOAuthClient, async_client)
+    binder.bind_to_constructor(
+        AsyncPkioMTLSClient,
+        lambda: RetryingAsyncClient(
+            async_client=async_client,
+            max_retries=app_config.medmij_whitelist.pull_max_retries,
+            backoff=app_config.medmij_whitelist.pull_initial_backoff_secs,
+            backoff_factor=app_config.medmij_whitelist.pull_backoff_factor,
+        ),
+    )
+
+
+def __bind_sync_pkio_mtls_client(binder: Binder, app_config: AppConfig) -> None:
+    """
+    Binds a PKIO-mTLS specific synchronous Client with retry logic for sync use-cases,
+    such as MedMij whitelist pulls that should not rely on asyncio.run.
+    """
+    sync_client: Client = SyncClientFactory.create(
+        tls_config=app_config.medmij_tls, proxy_config=app_config.outbound_proxy
+    )
+
+    binder.bind_to_constructor(
+        SyncPkioMTLSClient,
+        lambda: RetryingSyncClient(
+            sync_client=sync_client,
+            max_retries=app_config.medmij_whitelist.pull_max_retries,
+            backoff=app_config.medmij_whitelist.pull_initial_backoff_secs,
+            backoff_factor=app_config.medmij_whitelist.pull_backoff_factor,
+        ),
+    )
+
+
+def __bind_whitelist_repository(binder: Binder) -> None:
+    binder.bind_to_constructor(WhitelistRepository, RedisWhitelistRepository)
+
+
+def __bind_whitelist_xsd_file_repo(binder: Binder) -> None:
+    whitelist_xsd_file_repo = FilesystemWhitelistXsdRepository()
+    whitelist_xsd_file_repo.add_schema_to_cache(
+        MedMijWhitelistPuller.WHITELIST_XSD_LABEL,
+        root_path("resources", "medmij", "MedMij_Whitelist.xsd"),
+    )
+    binder.bind(XsdRepository, whitelist_xsd_file_repo)
+
+
+def __bind_medmij_whitelist_pull_service(binder: Binder, app_config: AppConfig) -> None:
+    binder.bind_to_constructor(
+        MedMijWhitelistPuller,
+        lambda: MedMijWhitelistPuller(
+            whitelist_url=app_config.medmij_whitelist.url,
+        ),
+    )
 
 
 def __bind_circuit_breaker(binder: Binder, app_config: AppConfig) -> None:
@@ -229,8 +320,8 @@ def __bind_circuit_breaker(binder: Binder, app_config: AppConfig) -> None:
         return InMemoryCircuitStateRepository()
 
     binder.bind_to_constructor(
-        CircuitBreakerService,
-        lambda: CircuitBreakerService(
+        CircuitBreaker,
+        lambda: CircuitBreaker(
             fail_max=app_config.circuit_breaker.fail_max,
             reset_timeout=app_config.circuit_breaker.reset_timeout,
             repository=__get_circuit_breaker_repository(app_config),
@@ -295,7 +386,7 @@ def __bind_medmij_oauth_token_adapter(binder: Binder, app_config: AppConfig) -> 
     def create_medmij_oauth_token_adapter(
         app_config: AppConfig,
     ) -> MedMijOauthTokenAdapter:
-        if app_config.oauth_tls is None:
+        if app_config.medmij_tls is None:
             raise ValueError(
                 "TLS configuration is required for MedMijOauthTokenAdapter"
             )
@@ -321,16 +412,16 @@ def __bind_medmij_oauth_token_adapter(binder: Binder, app_config: AppConfig) -> 
     )
 
 
-def __bind_medmij_logging(binder: Binder, app_config: AppConfig) -> None:
-    binder.bind_to_constructor(
-        MedMijLogger,
-        lambda: MedMijLogger(logging.getLogger("medmij")),
-    )
+def __bind_medmij_logging(
+    binder: Binder, app_config: AppConfig
+) -> tuple[MedMijLogger, LogMessageFactory]:
+    medmij_logger = MedMijLogger(logging.getLogger("medmij"))
+    log_message_factory = LogMessageFactory(app_config.base_url)
 
-    binder.bind_to_constructor(
-        LogMessageFactory,
-        lambda: LogMessageFactory(app_config.base_url),
-    )
+    binder.bind(MedMijLogger, medmij_logger)
+    binder.bind(LogMessageFactory, log_message_factory)
+
+    return medmij_logger, log_message_factory
 
 
 def __bind_oidc(binder: Binder, app_config: AppConfig) -> None:
@@ -387,3 +478,57 @@ def __bind_health_checkers(binder: Binder, redis_client: Redis) -> None:
     collection.append(RedisHealthChecker(redis_client=redis_client))
 
     binder.bind(HealthCheckerCollection, collection)
+
+
+def __bind_gateway(binder: Binder, app_config: AppConfig) -> None:
+    media_resource_header_factory: MediaResourceGatewayHeaderFactory = (
+        MinimalMediaResourceGatewayHeaderFactory()
+    )
+
+    if app_config.telemetry and app_config.telemetry.enabled:
+        media_resource_header_factory = OpenTelemetryMediaResourceGatewayHeaderFactory(
+            decorated=media_resource_header_factory
+        )
+
+    binder.bind(MediaResourceGatewayHeaderFactory, media_resource_header_factory)
+
+
+def __bind_event_manager(
+    binder: Binder,
+    medmij_logger: MedMijLogger,
+    log_message_factory: LogMessageFactory,
+) -> None:
+    dispatcher = EventManager()
+    www_authenticate_parser = WWWAuthenticateParser()
+
+    create_medmij_log_entry_for_request_init_listener = (
+        CreateMedMijLogEntryForRequestInit(
+            log_message_factory=log_message_factory,
+            medmij_logger=medmij_logger,
+            www_authenticate_parser=www_authenticate_parser,
+        )
+    )
+    create_medmij_log_entry_for_request_finished_listener = (
+        CreateMedMijLogEntryForRequestFinished(
+            log_message_factory=log_message_factory,
+            medmij_logger=medmij_logger,
+            www_authenticate_parser=www_authenticate_parser,
+        )
+    )
+    create_medmij_log_entry_for_request_timeout_listener = (
+        CreateMedMijLogEntryForRequestTimeout(
+            log_message_factory=log_message_factory,
+            medmij_logger=medmij_logger,
+            www_authenticate_parser=www_authenticate_parser,
+        )
+    )
+
+    dispatcher.subscribe(RequestInit, create_medmij_log_entry_for_request_init_listener)
+    dispatcher.subscribe(
+        RequestFinished, create_medmij_log_entry_for_request_finished_listener
+    )
+    dispatcher.subscribe(
+        RequestTimeout, create_medmij_log_entry_for_request_timeout_listener
+    )
+
+    binder.bind(EventManager, dispatcher)

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--File version: 13 -->
+<xs:schema
+    xmlns:whl="xmlns://afsprakenstelsel.medmij.nl/whitelist/release2/"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    targetNamespace="xmlns://afsprakenstelsel.medmij.nl/whitelist/release2/"
+    elementFormDefault="qualified"
+>
+    <xs:element name="Whitelist" type="whl:Whitelist" />
+
+    <xs:complexType name="Whitelist">
+        <xs:sequence>
+            <xs:element name="Tijdstempel" type="whl:DatumTijd" />
+            <xs:element name="Volgnummer" type="whl:Positiefnummer" />
+            <xs:element name="MedMijNodes" type="whl:MedMijNodes">
+                <xs:unique name="Unieke_MedMijNode">
+                    <xs:selector xpath="whl:MedMijNode/whl:Hostname" />
+                    <xs:field xpath="." />
+                </xs:unique>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+
+    <xs:complexType name="MedMijNodes">
+        <xs:sequence>
+            <xs:element
+                name="MedMijNode"
+                type="whl:MedMijNode"
+                minOccurs="0"
+                maxOccurs="unbounded"
+            />
+        </xs:sequence>
+    </xs:complexType>
+
+    <xs:complexType name="MedMijNode">
+        <xs:sequence>
+            <xs:element name="Hostname" type="whl:Hostname" />
+        </xs:sequence>
+    </xs:complexType>
+
+    <xs:simpleType name="DatumTijd">
+        <xs:restriction base="xs:dateTime">
+            <xs:pattern value=".{20,}" />
+        </xs:restriction>
+    </xs:simpleType>
+
+    <xs:simpleType name="Positiefnummer">
+        <xs:restriction base="xs:positiveInteger" />
+    </xs:simpleType>
+
+    <xs:simpleType name="Hostname">
+        <xs:restriction base="xs:string">
+            <xs:pattern value="(([a-z0-9])([a-z0-9-])*(\.))+([a-z0-9])([a-z0-9-])*([a-z0-9])" />
+        </xs:restriction>
+    </xs:simpleType>
+</xs:schema>

@@ -45,6 +45,34 @@ class TestGestStateEndpoint:
         assert "url_to_request" in response_json
 
     @pytest.mark.parametrize(
+        "invalid_jwe_endpoint_field",
+        ["authorization_server_url", "token_endpoint_url"],
+    )
+    def test_get_state_endpoint_with_invalid_jwe_endpoint_field_returns_bad_request(
+        self,
+        test_client: TestClient,
+        invalid_jwe_endpoint_field: str,
+        dva_endpoint_jwe: str,
+    ) -> None:
+        json = {
+            "authorization_server_url": dva_endpoint_jwe,
+            "token_endpoint_url": dva_endpoint_jwe,
+            "medmij_scope": "eenofanderezorgaanbieder",
+            "client_target_url": "https://client.example.com/callback",
+        }
+
+        json[invalid_jwe_endpoint_field] = "invalid-jwe"
+
+        response = test_client.post(
+            f"/getstate",
+            json=json,
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 400
+        assert response.json()["context"] == {"field": invalid_jwe_endpoint_field}
+
+    @pytest.mark.parametrize(
         "missing_parameter",
         [
             "authorization_server_url",
@@ -95,9 +123,9 @@ class TestGestStateEndpoint:
 
         response = test_client.post("/getstate", json=json)
 
-        assert response.status_code == 400
+        assert response.status_code == 422
         content = response.json()
-        assert content["detail"][0]["loc"] == [empty_parameter]
+        assert content["detail"][0]["loc"] == ["body", empty_parameter]
 
 
 class TestAuthCallbackEndpoint:
@@ -107,13 +135,14 @@ class TestAuthCallbackEndpoint:
         test_client: TestClient,
         mock_state_service: StateService,
     ) -> None:
-        mock_state_service_decrypt_state_token = mocker.patch.object(
-            mock_state_service, "decrypt_state_token"
+        mock_state_service_get_state_dto = mocker.patch.object(
+            mock_state_service, "get_state_dto"
         )
-        mock_state_service_decrypt_state_token.return_value = StateDTO(
+        mock_state_service_get_state_dto.return_value = StateDTO(
             token_endpoint_url="http://example.com/token",
             correlation_id="some_correlation_id",
             client_target_url="https://client.example.com/callback",
+            expiration_time=9999999999,
         )
 
         def bindings_override(binder: Binder) -> Binder:
@@ -140,10 +169,10 @@ class TestAuthCallbackEndpoint:
         test_client: TestClient,
         mock_state_service: StateService,
     ) -> None:
-        mock_state_service_decrypt_state_token = mocker.patch.object(
-            mock_state_service, "decrypt_state_token"
+        mock_state_service_get_state_dto = mocker.patch.object(
+            mock_state_service, "get_state_dto"
         )
-        mock_state_service_decrypt_state_token.side_effect = ExpiredStateException(
+        mock_state_service_get_state_dto.side_effect = ExpiredStateException(
             "State token has expired"
         )
 
@@ -165,11 +194,11 @@ class TestAuthCallbackEndpoint:
         test_client: TestClient,
         mock_state_service: StateService,
     ) -> None:
-        mock_state_service_decrypt_state_token = mocker.patch.object(
-            mock_state_service, "decrypt_state_token"
+        mock_state_service_get_state_dto = mocker.patch.object(
+            mock_state_service, "get_state_dto"
         )
-        mock_state_service_decrypt_state_token.side_effect = (
-            ExpirationTimeMissingException("No expiration time found in State token")
+        mock_state_service_get_state_dto.side_effect = ExpirationTimeMissingException(
+            "No expiration time found in State token"
         )
 
         self.__bind_mock(state_service=mock_state_service)
@@ -246,13 +275,14 @@ class TestAuthCallbackEndpoint:
         test_client: TestClient,
         mock_state_service: StateService,
     ) -> None:
-        mock_state_service_decrypt_state_token = mocker.patch.object(
-            mock_state_service, "decrypt_state_token"
+        mock_state_service_get_state_dto = mocker.patch.object(
+            mock_state_service, "get_state_dto"
         )
-        mock_state_service_decrypt_state_token.return_value = StateDTO(
+        mock_state_service_get_state_dto.return_value = StateDTO(
             token_endpoint_url="http://example.com/token",
             correlation_id="some_correlation_id",
             client_target_url="https://client.example.com/callback",
+            expiration_time=9999999999,
         )
 
         mock_token_service = mocker.Mock(MedMijOauthTokenService)
@@ -293,14 +323,15 @@ class TestAuthCallbackEndpoint:
     ) -> None:
         mock_state_service: StateService = mocker.Mock(spec=StateService)
 
-        mock_state_service_decrypt_state_token = mocker.patch.object(
-            mock_state_service, "decrypt_state_token"
+        mock_state_service_get_state_dto = mocker.patch.object(
+            mock_state_service, "get_state_dto"
         )
 
-        mock_state_service_decrypt_state_token.return_value = StateDTO(
+        mock_state_service_get_state_dto.return_value = StateDTO(
             token_endpoint_url="http://example.com/token",
             correlation_id="some_correlation_id",
             client_target_url="https://client.example.com/callback",
+            expiration_time=9999999999,
         )
 
         def bindings_override(binder: Binder) -> Binder:
@@ -378,6 +409,20 @@ class TestAuthRefreshEndpoint:
         content = response.json()
         assert content["detail"][0]["loc"] == ["query", missing_parameter]
 
+    def test_auth_refresh_endpoint_with_invalid_token_endpoint_jwe_responds_with_bad_request(
+        self, test_client: TestClient
+    ) -> None:
+        params = {
+            "token_endpoint_url": "invalid-jwe",
+            "refresh_token": "test_refresh_token",
+            "correlation_id": "xyz",
+        }
+
+        response = test_client.get(f"/auth/refresh", params=params)
+
+        assert response.status_code == 400
+        assert response.json()["context"] == {"field": "token_endpoint_url"}
+
     @pytest.mark.parametrize(
         "empty_parameter",
         [
@@ -385,7 +430,7 @@ class TestAuthRefreshEndpoint:
             "correlation_id",
         ],
     )
-    def test_it_returns_400_status_when_required_parameter_empty(
+    def test_it_returns_422_status_when_required_parameter_empty(
         self, empty_parameter: str, test_client: TestClient, dva_endpoint_jwe: str
     ) -> None:
         query_params = {
@@ -398,6 +443,6 @@ class TestAuthRefreshEndpoint:
 
         response = test_client.get("/auth/refresh", params=query_params)
 
-        assert response.status_code == 400
+        assert response.status_code == 422
         content = response.json()
-        assert content["detail"][0]["loc"] == [empty_parameter]
+        assert content["detail"][0]["loc"] == ["query", empty_parameter]

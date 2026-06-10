@@ -5,12 +5,11 @@ import pytest
 from fastapi import Request
 from httpx import Response as HttpxResponse
 from httpx import TimeoutException
-from pydantic import AnyHttpUrl
 from pytest_mock import MockerFixture
 
 from app.circuitbreaker.models import CircuitOpenException
-from app.circuitbreaker.services import CircuitBreakerService
-from app.forwarding.schemas import ForwardingRequest
+from app.circuitbreaker.services import CircuitBreaker
+from app.forwarding.schemas import ForwardingRequestHeaders
 from app.forwarding.services import ForwardingService, RequestForwardingLogHandler
 from app.medmij_logging.schemas import (
     ErrorData,
@@ -38,7 +37,7 @@ def make_www_authenticate_header(
 
 
 def make_forwarding_service(
-    circuit_breaker: CircuitBreakerService, medmij_logger: MedMijLogger
+    circuit_breaker: CircuitBreaker, medmij_logger: MedMijLogger
 ) -> ForwardingService:
     forwarding_service: ForwardingService = ForwardingService(
         circuit_breaker=circuit_breaker,
@@ -69,13 +68,15 @@ def test_request(mocker: MockerFixture) -> Request:
 
 
 @pytest.fixture
-def test_headers() -> ForwardingRequest:
-    return ForwardingRequest(
-        dva_target=AnyHttpUrl("https://mock_target"),
+def test_headers() -> ForwardingRequestHeaders:
+    return ForwardingRequestHeaders(
+        dva_target_url="https://mock_target",
         x_mgo_provider_id="eenofanderezorgaanbieder",
         x_mgo_service_id=63,
         accept="application/fhir+json; fhirVersion=3.0",
-    )  # type: ignore
+        oauth_access_token=None,
+        correlation_id=None,
+    )
 
 
 @pytest.fixture
@@ -125,13 +126,13 @@ async def test_it_logs_resource_request_error_with_provided_error_context(
     medmij_logger_spy: MockerFixture,
     mocker: MockerFixture,
     test_request: Request,
-    test_headers: ForwardingRequest,
+    test_headers: ForwardingRequestHeaders,
     response_status_code: int,
     www_authenticate_header: str,
     expected_error: str,
     expected_error_description: str,
 ) -> None:
-    circuit_breaker_mock = mocker.Mock(CircuitBreakerService)
+    circuit_breaker_mock = mocker.Mock(CircuitBreaker)
     circuit_breaker_mock.call = mocker.AsyncMock(
         return_value=HttpxResponse(
             status_code=response_status_code,
@@ -190,13 +191,13 @@ async def test_it_logs_resource_request_error_with_default_error_context(
     medmij_logger_spy: MockerFixture,
     mocker: MockerFixture,
     test_request: Request,
-    test_headers: ForwardingRequest,
+    test_headers: ForwardingRequestHeaders,
     response_status_code: int,
     www_authenticate_header: str | None,
     expected_error: str,
     expected_error_description: str,
 ) -> None:
-    circuit_breaker_mock = mocker.Mock(CircuitBreakerService)
+    circuit_breaker_mock = mocker.Mock(CircuitBreaker)
     circuit_breaker_mock.call = mocker.AsyncMock(
         return_value=HttpxResponse(
             status_code=response_status_code,
@@ -235,10 +236,10 @@ async def test_it_logs_resource_error_response_on_request_timeout(
     medmij_logger_spy: MockerFixture,
     mocker: MockerFixture,
     test_request: Request,
-    test_headers: ForwardingRequest,
+    test_headers: ForwardingRequestHeaders,
     exception_type: type[Exception],
 ) -> None:
-    circuit_breaker_mock = mocker.Mock(CircuitBreakerService)
+    circuit_breaker_mock = mocker.Mock(CircuitBreaker)
     circuit_breaker_mock.call = mocker.AsyncMock(
         side_effect=exception_type("Request timed out")
     )
@@ -271,10 +272,10 @@ async def test_it_logs_resource_error_response_on_other_error_responses(
     medmij_logger_spy: MockerFixture,
     mocker: MockerFixture,
     test_request: Request,
-    test_headers: ForwardingRequest,
+    test_headers: ForwardingRequestHeaders,
     response_status_code: int,
 ) -> None:
-    circuit_breaker_mock = mocker.Mock(CircuitBreakerService)
+    circuit_breaker_mock = mocker.Mock(CircuitBreaker)
     circuit_breaker_mock.call = mocker.AsyncMock(
         return_value=HttpxResponse(
             status_code=response_status_code,

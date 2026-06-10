@@ -34,24 +34,17 @@ RUN apt-get update && \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Add the SSH public keys of the Git server to the known hosts (here, github.com)
+RUN mkdir -p /etc/ssh && ssh-keyscan github.com >> /etc/ssh/ssh_known_hosts
+
 WORKDIR ${PROJECT_DIR}
 
 FROM base AS builder
-
-RUN mkdir -p -m 0700 /root/.ssh && \
-    mkdir -p -m 0700 /home/${APP_USER}/.ssh && \
-    ssh-keyscan github.com | tee -a /root/.ssh/known_hosts /home/${APP_USER}/.ssh/known_hosts
 
 COPY pyproject.toml uv.lock ./
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=ssh \
-    --mount=type=secret,id=github_token,required=false \
-    if [ -s /run/secrets/github_token ]; then \
-        GITHUB_TOKEN=$(cat /run/secrets/github_token); \
-        git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "git@github.com:"; \
-        git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "ssh://git@github.com/"; \
-    fi; \
     uv sync --locked --dev
 
 FROM base AS final

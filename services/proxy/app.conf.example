@@ -55,10 +55,19 @@ auth_redirect_uri=http://localhost:8001/auth/callback
 ;signature_lifetime_secs=
 ;mock_oauth_servers=true
 
-[oauth_tls]
+[medmij_tls]
 client_cert=certs/out/client.crt
 client_key=certs/out/client.key
 ca_cert=certs/out/ca.crt
+
+[medmij_whitelist]
+;prod url
+;url=
+;acceptance(interoplab): url=https://services.interoplab.nl/MedMij_Whitelist.xml?api=2
+;example url(public): url=https://afsprakenstelsel.medmij.nl/__attachments/335938893/MedMij_Whitelist_example.9.2.xml
+;pull_max_retries=
+;pull_initial_backoff_secs=
+;pull_backoff_factor=
 
 [dva_target]
 jwe_encryption_private_key=secrets/dva_target/jwe.key

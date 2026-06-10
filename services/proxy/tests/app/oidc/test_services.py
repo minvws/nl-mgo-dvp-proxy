@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlsplit
 from faker import Faker
 from jwcrypto.jwk import JWK
 from jwcrypto.jwt import JWT
+from mgo_keystore_repositories import JWKRepository
 from pytest import fixture, raises
 from pytest_mock import MockerFixture
 
@@ -32,7 +33,6 @@ from app.oidc.services import (
     VadAuthorizationUrlProvider,
     VadUserinfoProvider,
 )
-from app.security.repositories import JWKRepository
 from app.security.services import Encrypter
 
 

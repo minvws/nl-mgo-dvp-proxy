@@ -144,9 +144,10 @@ jobs:
 
             - name: Upload coverage report
               uses: actions/upload-artifact@v7
+              if: always()
               with:
                 name: coverage-proxy
-                path: services/proxy
+                path: services/proxy/coverage.xml
 
     sonar:
         name: SonarCloud

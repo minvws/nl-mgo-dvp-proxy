@@ -16,7 +16,7 @@ source_roots = [
 
 [[modules ]]
 path = "app.authentication"
-depends_on = ["app.security", "app.forwarding", "app.medmij_logging"]
+depends_on = ["app.security", "app.forwarding", "app.medmij_logging", "app.http_client"]
 
 [[modules ]]
 path = "app.telemetry"
@@ -44,7 +44,7 @@ depends_on = [ "app.forwarding", "app.authentication", "app.oidc", "app.telemetr
 
 [[modules ]]
 path = "app.medmij_logging"
-depends_on = []
+depends_on = ["app.forwarding"]
 
 [[modules ]]
 path = "app.security"
@@ -64,7 +64,7 @@ depends_on = ["app.oidc", "app.security"]
 
 [[modules ]]
 path = "app.exception_handlers"
-depends_on = ["app.authentication"]
+depends_on = ["app.authentication", "app.security"]
 
 [[modules ]]
 path = "app.docs"

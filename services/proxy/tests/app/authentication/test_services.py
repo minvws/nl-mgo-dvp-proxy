@@ -6,10 +6,12 @@ import uuid
 import faker
 import inject
 import pytest
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from inject import ConstructorTypeError
 from pytest_mock import MockerFixture
 
+from app.authentication.constants import STATE_TOKEN_SEPARATOR
 from app.authentication.exceptions import (
     ExpirationTimeMissingException,
     ExpirationTimeTypeException,
@@ -28,22 +30,30 @@ from app.authentication.services import (
 
 class TestStateService:
     @pytest.fixture
-    def state_service(self) -> StateService:
-        key: bytes = self.__get_random_key()
-        return StateService(signing_keys=[key], signature_lifetime_secs=900)
+    def state_signing_key(self) -> bytes:
+        return self.__get_random_key()
+
+    @pytest.fixture
+    def state_service(self, state_signing_key: bytes) -> StateService:
+        return StateService(
+            signing_keys=[state_signing_key], signature_lifetime_secs=900
+        )
 
     def __get_random_key(self) -> bytes:
         key = os.urandom(32)
         key = base64.urlsafe_b64encode(key)
         return key
 
+    def __encrypt_state_payload(self, signing_key: bytes, payload: str) -> str:
+        return Fernet(signing_key).encrypt(payload.encode()).decode("utf-8")
+
     @pytest.fixture
-    def state_dto(self) -> StateDTO:
-        return StateDTO(
-            client_target_url="https://example.com",
-            token_endpoint_url="https://example.com/token",
-            correlation_id="correlation_id",
-        )
+    def generate_state_token_args(self, faker: faker.Faker) -> dict[str, str]:
+        return {
+            "correlation_id": faker.uuid4(),
+            "token_endpoint_url": faker.url(),
+            "client_target_url": faker.url(),
+        }
 
     def test_it_throws_error_when_no_key_is_provided(self) -> None:
         try:
@@ -61,9 +71,9 @@ class TestStateService:
         )
 
     def test_it_can_generate_a_state_token(
-        self, state_service: StateService, state_dto: StateDTO
+        self, state_service: StateService, generate_state_token_args: dict[str, str]
     ) -> None:
-        token = state_service.generate_state_token(state_dto)
+        token = state_service.generate_state_token(**generate_state_token_args)
 
         assert token is not None
         # Token should not be empty
@@ -71,29 +81,52 @@ class TestStateService:
         # Token should not be too long
         assert len(token) < 512
 
-    def test_it_can_decrypt_a_state_token(
-        self, state_service: StateService, state_dto: StateDTO
+    def test_it_keeps_a_longer_state_token_within_the_size_limit(
+        self, state_service: StateService, generate_state_token_args: dict[str, str]
     ) -> None:
-        token = state_service.generate_state_token(state_dto)
-        decrypted_token: StateDTO = state_service.decrypt_state_token(token)
+        state_dto = StateDTO(
+            correlation_id="123e4567-e89b-12d3-a456-426614174000",
+            token_endpoint_url=(
+                "https://authorization-server.example.com/oauth2/token/tenant/region/"
+                "environment/node?client=medmij&flow=collect&version=v1"
+            ),
+            client_target_url=(
+                "https://mgo.example.com/callback/mobile/native/session/redirect/"
+                "proxy?platform=ios&return=dashboard&context=collect&tenant=prod"
+            ),
+            expiration_time=9999999999,
+        )
 
-        assert decrypted_token.client_target_url == state_dto.client_target_url
+        token = state_service.generate_state_token(**generate_state_token_args)
+
+        assert len(token) < 512
+
+    def test_it_can_decrypt_a_state_token(
+        self, state_service: StateService, generate_state_token_args: dict[str, str]
+    ) -> None:
+        token = state_service.generate_state_token(**generate_state_token_args)
+        decrypted_token: StateDTO = state_service.get_state_dto(token)
+
+        assert (
+            decrypted_token.client_target_url
+            == generate_state_token_args["client_target_url"]
+        )
 
     def test_it_can_verify_a_state_token_without_exception(
-        self, state_service: StateService, state_dto: StateDTO
+        self, state_service: StateService, generate_state_token_args: dict[str, str]
     ) -> None:
-        token = state_service.generate_state_token(state_dto)
+        token = state_service.generate_state_token(**generate_state_token_args)
         state_service.verify_state_token(token)
 
     def test_the_state_token_includes_a_lifetime(
-        self, state_service: StateService, state_dto: StateDTO
+        self, state_service: StateService, generate_state_token_args: dict[str, str]
     ) -> None:
         now = int(time.time())
         exp = now + 900
 
-        token = state_service.generate_state_token(state_dto)
+        token = state_service.generate_state_token(**generate_state_token_args)
 
-        decrypted_token: StateDTO = state_service.decrypt_state_token(token)
+        decrypted_token: StateDTO = state_service.get_state_dto(token)
 
         assert decrypted_token.expiration_time == exp
 
@@ -101,77 +134,126 @@ class TestStateService:
         self,
         state_service: StateService,
         mocker: MockerFixture,
-        state_dto: StateDTO,
+        generate_state_token_args: dict[str, str],
     ) -> None:
-        token: str = state_service.generate_state_token(state_dto=state_dto)
-        decrypted_token: StateDTO = state_service.decrypt_state_token(token=token)
+        token: str = state_service.generate_state_token(**generate_state_token_args)
+        decrypted_token: StateDTO = state_service.get_state_dto(token=token)
 
-        assert decrypted_token.correlation_id == "correlation_id"
+        assert (
+            decrypted_token.correlation_id
+            == generate_state_token_args["correlation_id"]
+        )
 
     def test_the_token_is_invalid_after_expiry(
         self,
         state_service: StateService,
-        state_dto: StateDTO,
+        generate_state_token_args: dict[str, str],
         mocker: MockerFixture,
     ) -> None:
         mocker.patch("time.time", return_value=0)
-        token = state_service.generate_state_token(state_dto=state_dto)
+        token = state_service.generate_state_token(**generate_state_token_args)
         mocker.patch("time.time", return_value=901)
 
         with pytest.raises(ExpiredStateException, match="State token has expired") as e:
-            state_service.decrypt_state_token(token)
+            state_service.get_state_dto(token)
 
     def test_it_throws_an_exception_when_exp_is_not_int(
         self,
+        state_signing_key: bytes,
         state_service: StateService,
-        state_dto: StateDTO,
-        mocker: MockerFixture,
     ) -> None:
-        mocker.patch("json.dumps", return_value='{"expiration_time": "not an int"}')
-        token = state_service.generate_state_token(state_dto)
+        token = self.__encrypt_state_payload(
+            state_signing_key,
+            STATE_TOKEN_SEPARATOR.join(
+                [
+                    "correlation_id",
+                    "https://example.com/token",
+                    "https://example.com/callback",
+                    "not an int",
+                ]
+            ),
+        )
 
         with pytest.raises(
             ExpirationTimeTypeException, match="Expiration time is not an integer"
         ) as e:
-            state_service.decrypt_state_token(token)
+            state_service.get_state_dto(token)
 
     def test_it_throws_an_exception_when_no_exp_is_found(
         self,
+        state_signing_key: bytes,
         state_service: StateService,
-        state_dto: StateDTO,
-        mocker: MockerFixture,
     ) -> None:
-        mocker.patch("json.dumps", return_value="{}")
-        token = state_service.generate_state_token(state_dto)
+        token = self.__encrypt_state_payload(
+            state_signing_key,
+            STATE_TOKEN_SEPARATOR.join(
+                [
+                    "correlation_id",
+                    "https://example.com/token",
+                    "https://example.com/callback",
+                ]
+            ),
+        )
 
         with pytest.raises(
-            ExpirationTimeMissingException,
-            match="No expiration time found in State token",
+            InvalidStateException,
+            match="Expected 4 parts in deserialized state, got: 3",
         ) as e:
-            state_service.decrypt_state_token(token)
+            state_service.get_state_dto(token)
 
     def test_it_throws_an_exception_when_exp_is_none(
         self,
+        state_signing_key: bytes,
         state_service: StateService,
-        state_dto: StateDTO,
-        mocker: MockerFixture,
     ) -> None:
-        mocker.patch("json.dumps", return_value='{"exp": null}')
-        token = state_service.generate_state_token(state_dto)
+        token = self.__encrypt_state_payload(
+            state_signing_key,
+            STATE_TOKEN_SEPARATOR.join(
+                [
+                    "correlation_id",
+                    "https://example.com/token",
+                    "https://example.com/callback",
+                    "",
+                ]
+            ),
+        )
 
         with pytest.raises(
             ExpirationTimeMissingException,
             match="No expiration time found in State token",
         ) as e:
-            state_service.decrypt_state_token(token)
+            state_service.get_state_dto(token)
+
+    def test_it_throws_an_exception_when_state_payload_has_too_many_parts(
+        self,
+        state_signing_key: bytes,
+        state_service: StateService,
+    ) -> None:
+        token = self.__encrypt_state_payload(
+            state_signing_key,
+            STATE_TOKEN_SEPARATOR.join(
+                [
+                    "correlation_id",
+                    "https://example.com/token",
+                    "https://example.com/callback",
+                    "123",
+                    "unexpected",
+                ]
+            ),
+        )
+
+        with pytest.raises(
+            InvalidStateException,
+            match="Expected 4 parts in deserialized state, got: 5",
+        ):
+            state_service.get_state_dto(token)
 
     def test_it_throws_an_exception_when_it_cannot_decrypt_the_token_with_any_key(
         self,
         state_service: StateService,
-        state_dto: StateDTO,
-        mocker: MockerFixture,
+        generate_state_token_args: dict[str, str],
     ) -> None:
-        token = state_service.generate_state_token(state_dto)
+        token = state_service.generate_state_token(**generate_state_token_args)
 
         key: bytes = self.__get_random_key()
         new_state_service = StateService(
@@ -179,7 +261,27 @@ class TestStateService:
         )
 
         with pytest.raises(InvalidStateException, match="Could not decrypt state") as e:
-            new_state_service.decrypt_state_token(token)
+            new_state_service.get_state_dto(token)
+
+    def test_it_can_decrypt_the_token_with_a_secondary_key(
+        self, state_signing_key: bytes, generate_state_token_args: dict[str, str]
+    ) -> None:
+        secondary_key = self.__get_random_key()
+        token = StateService(
+            signing_keys=[secondary_key], signature_lifetime_secs=900
+        ).generate_state_token(**generate_state_token_args)
+
+        state_service = StateService(
+            signing_keys=[state_signing_key, secondary_key],
+            signature_lifetime_secs=900,
+        )
+
+        decrypted_token = state_service.get_state_dto(token)
+
+        assert (
+            decrypted_token.client_target_url
+            == generate_state_token_args["client_target_url"]
+        )
 
 
 class TestMedMijAuthRequestUrlDirector:
@@ -418,32 +520,6 @@ class TestMedMijAuthRequestUrlDirector:
         director.add_response_type.assert_called_once()
         director.add_redirect_uri.assert_called_once()
         director.add_scope.assert_called_once_with(scope=test_scope)
-
-    def test_it_pops_the_mgo_signature_from_the_token_url(
-        self, mocker: MockerFixture
-    ) -> None:
-        mock_state_service = mocker.Mock(StateService)
-        director_instance = MedMijAuthRequestUrlDirector(
-            client_id="test",
-            redirect_url="https://example.com/callback",
-            builder=UrlBuilder(),
-            state_service=mock_state_service,
-        )
-
-        token_url = "https://example-token-server.com?mgo_signature=signature&foo=bar"
-
-        director_instance.add_state(
-            client_target_url="https://example.com",
-            correlation_id=uuid.uuid4(),
-            token_endpoint_url=token_url,
-        )
-
-        mock_state_service.generate_state_token.assert_called_once()
-        args, kwargs = mock_state_service.generate_state_token.call_args
-        assert (
-            kwargs["state_dto"].token_endpoint_url
-            == "https://example-token-server.com?foo=bar"
-        )
 
 
 class TestMedMijAccessTokenCallbackUrlBuilder:

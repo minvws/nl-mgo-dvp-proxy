@@ -24,7 +24,7 @@ class MetricService:
         return hostname.replace(".", "_")
 
     def measure_request_latency(self, start_time: float, dva_url: str) -> None:
-        latency = int((time.time() - start_time) * 1000)
+        latency = int((time.perf_counter() - start_time) * 1000)
         key = Metrics.DVA_REQUEST_LATENCY.format_key(
             {
                 "dva": self.sanitize_url(dva_url),

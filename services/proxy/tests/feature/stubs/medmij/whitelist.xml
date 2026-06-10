@@ -1,0 +1,27 @@
+<Whitelist xmlns="xmlns://afsprakenstelsel.medmij.nl/whitelist/release2/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="xmlns://afsprakenstelsel.medmij.nl/whitelist/release2/ ">
+<Tijdstempel>2021-04-16T10:43:41+01:00</Tijdstempel>
+<Volgnummer>28654</Volgnummer>
+<MedMijNodes>
+<MedMijNode>
+<Hostname>medmij.deenigeechtepgo.nl</Hostname>
+</MedMijNode>
+<MedMijNode>
+<Hostname>pgocluster68.personalhealthprovider.net</Hostname>
+</MedMijNode>
+<MedMijNode>
+<Hostname>78834.umcharderwijk.nl</Hostname>
+</MedMijNode>
+<MedMijNode>
+<Hostname>medmij.za982.xisbridge.net</Hostname>
+</MedMijNode>
+<MedMijNode>
+<Hostname>medmij.za983.xisbridge.net</Hostname>
+</MedMijNode>
+<MedMijNode>
+<Hostname>medmij.xisbridge.net</Hostname>
+</MedMijNode>
+<MedMijNode>
+<Hostname>rcf-rso.nl</Hostname>
+</MedMijNode>
+</MedMijNodes>
+</Whitelist>

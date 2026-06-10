@@ -1,4 +1,3 @@
-import json
 import time
 import uuid
 from typing import List
@@ -17,6 +16,14 @@ from app.medmij_logging.factories import LogMessageFactory
 from app.medmij_logging.services import MedMijLogger, ServerIdentifier
 from app.utils import resolve_instance
 
+from .constants import (
+    STATE_TOKEN_CLIENT_TARGET_URL_INDEX,
+    STATE_TOKEN_CORRELATION_ID_INDEX,
+    STATE_TOKEN_EXPIRATION_TIME_INDEX,
+    STATE_TOKEN_PART_COUNT,
+    STATE_TOKEN_SEPARATOR,
+    STATE_TOKEN_TOKEN_ENDPOINT_URL_INDEX,
+)
 from .exceptions import (
     ExpirationTimeMissingException,
     ExpirationTimeTypeException,
@@ -32,6 +39,40 @@ class StateService:
         self.__keys: List[bytes] = signing_keys
         self.__signature_lifetime_secs: int = signature_lifetime_secs
 
+    def __deserialize_state_payload(self, parts: list[str]) -> StateDTO:
+        raw_expiration_time = parts[STATE_TOKEN_EXPIRATION_TIME_INDEX]
+
+        if not raw_expiration_time:
+            raise ExpirationTimeMissingException(
+                "No expiration time found in State token"
+            )
+
+        try:
+            expiration_time = int(raw_expiration_time)
+        except ValueError as exception:
+            raise ExpirationTimeTypeException(
+                "Expiration time is not an integer"
+            ) from exception
+
+        state_dto = StateDTO(
+            correlation_id=parts[STATE_TOKEN_CORRELATION_ID_INDEX],
+            token_endpoint_url=parts[STATE_TOKEN_TOKEN_ENDPOINT_URL_INDEX],
+            client_target_url=parts[STATE_TOKEN_CLIENT_TARGET_URL_INDEX],
+            expiration_time=expiration_time,
+        )
+
+        return state_dto
+
+    def __get_state_payload_parts(self, data_string: bytes) -> list[str]:
+        parts = data_string.decode("utf-8").split(STATE_TOKEN_SEPARATOR)
+
+        if len(parts) != STATE_TOKEN_PART_COUNT:
+            raise InvalidStateException(
+                f"Expected {STATE_TOKEN_PART_COUNT} parts in deserialized state, got: {len(parts)}"
+            )
+
+        return parts
+
     def __attempt_decrypt(self, encrypted_message: str) -> bytes:
         """
         Loop through all keys and attempt to decrypt the message,
@@ -41,46 +82,42 @@ class StateService:
         for key in self.__keys:
             try:
                 cipher_suite: Fernet = Fernet(key)
-                decrypted_message: bytes = cipher_suite.decrypt(encrypted_message)
-
+                return cipher_suite.decrypt(encrypted_message)
             except InvalidToken:
-                raise InvalidStateException("Could not decrypt state")
+                continue
 
-        return decrypted_message
+        raise InvalidStateException("Could not decrypt state")
 
-    def generate_state_token(self, state_dto: StateDTO) -> str:
+    def generate_state_token(
+        self, correlation_id: str, token_endpoint_url: str, client_target_url: str
+    ) -> str:
         cipher_suite: Fernet = Fernet(self.__keys[0])
+        expiration_time = int(time.time()) + self.__signature_lifetime_secs
 
-        now = int(time.time())
-        state_dto.set_expiration(now + self.__signature_lifetime_secs)
-
-        message: str = json.dumps(state_dto.to_dict())
+        message = STATE_TOKEN_SEPARATOR.join(
+            [
+                correlation_id,
+                token_endpoint_url,
+                client_target_url,
+                str(expiration_time),
+            ]
+        )
         encrypted_message: bytes = cipher_suite.encrypt(message.encode())
 
         return encrypted_message.decode("utf-8")
 
-    def decrypt_state_token(self, token: str) -> StateDTO:
+    def get_state_dto(self, token: str) -> StateDTO:
         data_string: bytes = self.__attempt_decrypt(token)
-        data: dict[str, str | int | None] = json.loads(data_string.decode("utf-8"))
-        exp: int | str | None = data.get("expiration_time")
+        parts = self.__get_state_payload_parts(data_string)
+        state_dto = self.__deserialize_state_payload(parts)
 
-        if exp is None:
-            raise ExpirationTimeMissingException(
-                "No expiration time found in State token"
-            )
-
-        if not isinstance(exp, int):
-            raise ExpirationTimeTypeException("Expiration time is not an integer")
-
-        current_time: int = int(time.time())
-
-        if current_time > int(exp):
+        if int(time.time()) > state_dto.expiration_time:
             raise ExpiredStateException("State token has expired")
 
-        return StateDTO.from_dict(data)
+        return state_dto
 
     def verify_state_token(self, token: str) -> None:
-        self.decrypt_state_token(token=token)
+        self.get_state_dto(token=token)
 
 
 class UrlBuilder:
@@ -134,13 +171,12 @@ class MedMijAuthRequestUrlDirector:
             token_endpoint_url=token_endpoint_url
         )
 
-        initial_state = StateDTO(
+        state: str = self.__state_service.generate_state_token(
             correlation_id=correlation_id,
             token_endpoint_url=token_endpoint_url_without_signature,
             client_target_url=client_target_url,
         )
 
-        state: str = self.__state_service.generate_state_token(state_dto=initial_state)
         self._builder.add_param(name="state", value=state)
 
     def add_client_id(self) -> None:

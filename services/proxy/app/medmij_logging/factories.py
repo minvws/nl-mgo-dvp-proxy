@@ -102,7 +102,7 @@ class LogMessageFactory:
             event=self.__create_event_data(
                 session_id=session_id,
                 trace_id=trace_id,
-                type=EventType.RECEIVE_RESOURCE_REQUEST_ERROR,
+                type=EventType.RECEIVE_RESOURCE_RESPONSE,
             ),
             response=ResponseData(id=request_id, status=status_code),
         )

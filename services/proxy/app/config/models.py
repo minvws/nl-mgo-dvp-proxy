@@ -53,10 +53,6 @@ class TlsConfig(BaseModel):  # pragma: no cover
     ca_cert: str | None = None
 
 
-class OAuthTlsConfig(TlsConfig):  # pragma: no cover
-    pass
-
-
 class RetryConfig(InjectableConfig):
     max_retries: int = Field(ge=0)
     # Initial debounce (in seconds) before retrying request
@@ -128,6 +124,13 @@ class OAuthConfig(InjectableConfig):
     auth_redirect_uri: str
     # Enable/disable mocked oauth servers (auth, token)
     mock_oauth_servers: bool = False
+
+
+class MedMijWhitelistConfig(InjectableConfig):
+    url: str = Field(default="https://register.medmij.nl/MedMij_Whitelist.xml?api=2")
+    pull_max_retries: int = Field(default=10, ge=0)
+    pull_initial_backoff_secs: float = Field(default=0.5, gt=0)
+    pull_backoff_factor: float = Field(default=2.0, gt=0)
 
 
 class DvaTargetConfig(InjectableConfig):
@@ -213,8 +216,9 @@ class AppConfig(BaseModel):
     circuit_breaker: CircuitBreaker
     redis: Redis
     oauth: OAuthConfig
-    # OAuth mTLS configuration
-    oauth_tls: OAuthTlsConfig | None = None
+    # Shared MedMij mTLS configuration, used for OAuth and whitelist pulls
+    medmij_tls: TlsConfig | None = None
+    medmij_whitelist: MedMijWhitelistConfig = MedMijWhitelistConfig()
     dva_target: DvaTargetConfig
     telemetry: TelemetryConfig | None = None
     oidc: OidcConfig

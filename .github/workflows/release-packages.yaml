@@ -21,7 +21,7 @@ jobs:
       - name: Run source package action
         uses: minvws/action-generic-build-package@v1
         with:
-          include_paths: "app static tools app.conf.example HOSTING_CHANGELOG.md"
+          include_paths: "app resources static tools app.conf.example HOSTING_CHANGELOG.md"
           package_file_name: ${{ env.PACKAGE_FILE_NAME }}
           working_directory: ${{ env.WORKING_DIRECTORY }}
 

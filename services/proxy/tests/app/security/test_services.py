@@ -3,11 +3,11 @@ from os import urandom
 from ssl import SSLContext
 
 from cryptography.fernet import InvalidToken
+from mgo_keystore_repositories import SecretRepository
 from pytest import fixture, raises
 from pytest_mock import MockerFixture, MockType
 
 from app.security.exceptions import CouldNotDecryptPayload
-from app.security.repositories import SecretRepository
 from app.security.services import FernetEncrypter, SslContextFactory
 
 

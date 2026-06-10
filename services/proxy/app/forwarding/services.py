@@ -1,3 +1,4 @@
+import logging
 import uuid
 from logging import Logger
 from typing import Any, Optional
@@ -10,14 +11,7 @@ from httpx import Response as HttpxResponse
 from opentelemetry.propagate import inject as op_inject
 
 from app.circuitbreaker.models import CircuitOpenException
-from app.circuitbreaker.services import CircuitBreakerService
-from app.forwarding.constants import (
-    FORWARD_URL_RESPONSE_HEADER,
-    MEDMIJ_CORRELATION_ID_HEADER,
-    MEDMIJ_REQUEST_ID_HEADER,
-    MGO_DATASERVICE_ID_HEADER,
-    MGO_HEALTHCARE_PROVIDER_ID_HEADER,
-)
+from app.circuitbreaker.services import CircuitBreaker
 from app.medmij_logging.constants import WWW_AUTHENTICATE_HEADER
 from app.medmij_logging.factories import LogMessageFactory
 from app.medmij_logging.services import (
@@ -25,9 +19,24 @@ from app.medmij_logging.services import (
     ServerIdentifier,
     WWWAuthenticateParser,
 )
+from app.observer.services import EventManager
 from app.security.utils import LogSanitizer
 
-from .schemas import ForwardingRequest
+from .constants import (
+    FORWARD_URL_RESPONSE_HEADER,
+    MEDMIJ_CORRELATION_ID_HEADER,
+    MEDMIJ_REQUEST_ID_HEADER,
+    MGO_DATASERVICE_ID_HEADER,
+    MGO_HEALTHCARE_PROVIDER_ID_HEADER,
+)
+from .events import RequestFinished, RequestInit, RequestTimeout
+from .factories import MediaResourceGatewayHeaderFactory
+from .schemas import (
+    ForwardingRequestHeaders,
+    ForwardMediaResourceRequestHeaders,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class RequestForwardingLogHandler:
@@ -195,19 +204,19 @@ class ForwardingService:
     @inject.autoparams()
     def __init__(
         self,
-        circuit_breaker: CircuitBreakerService,
+        circuit_breaker: CircuitBreaker,
         async_client: AsyncClient,
         logger: Logger,
         request_forwarding_log_handler: RequestForwardingLogHandler,
     ) -> None:
-        self.circuit_breaker: CircuitBreakerService = circuit_breaker
+        self.circuit_breaker: CircuitBreaker = circuit_breaker
         self.async_client: AsyncClient = async_client
         self.logger: Logger = logger
         self._request_forwarding_log_handler: RequestForwardingLogHandler = (
             request_forwarding_log_handler
         )
 
-    def get_forward_headers(self, headers: ForwardingRequest) -> dict[str, str]:
+    def get_forward_headers(self, headers: ForwardingRequestHeaders) -> dict[str, str]:
         forward_headers: dict[str, str] = {
             MEDMIJ_REQUEST_ID_HEADER: str(uuid.uuid4()),
         }
@@ -273,10 +282,10 @@ class ForwardingService:
         }
 
     async def get_resource(
-        self, path: str, request: Request, headers: ForwardingRequest
+        self, path: str, request: Request, headers: ForwardingRequestHeaders
     ) -> Response:
         forward_url: str = self.generate_forward_url(
-            target_url=str(headers.dva_target),
+            target_url=str(headers.dva_target_url),
             path=path,
             query=request.url.query,
         )
@@ -331,7 +340,7 @@ class ForwardingService:
         )
 
         self.logger.info(
-            f"Executed Forward request to {LogSanitizer.sanitize(forward_url)} and received status code {httpx_response.status_code}"
+            f"Proxied request to {LogSanitizer.sanitize(forward_url)} and received status code {httpx_response.status_code}"
         )
 
         response_headers: dict[Any, Any] = self.filter_response_headers(
@@ -352,7 +361,7 @@ class ForwardingService:
         trace_id: str,
         forward_url: str,
         request: Request,
-        headers: ForwardingRequest,
+        headers: ForwardingRequestHeaders,
     ) -> None:
         missing: list[str] = self.validate_feature_flag_headers(headers)
         if missing:
@@ -375,10 +384,122 @@ class ForwardingService:
             service_id=headers.x_mgo_service_id,
         )
 
-    def validate_feature_flag_headers(self, headers: ForwardingRequest) -> list[str]:
+    def validate_feature_flag_headers(
+        self, headers: ForwardingRequestHeaders
+    ) -> list[str]:
         missing: list[str] = []
         if not headers.x_mgo_provider_id:
             missing.append(MGO_HEALTHCARE_PROVIDER_ID_HEADER)
         if not headers.x_mgo_service_id:
             missing.append(MGO_DATASERVICE_ID_HEADER)
         return missing
+
+
+class MediaResourceGateway:
+    @inject.autoparams(
+        "event_manager",
+        "async_client",
+        "circuit_breaker",
+        "header_factory",
+    )
+    def __init__(
+        self,
+        event_manager: EventManager,
+        async_client: AsyncClient,
+        circuit_breaker: CircuitBreaker,
+        header_factory: MediaResourceGatewayHeaderFactory,
+    ) -> None:
+        self.__event_manager: EventManager = event_manager
+        self.__async_client: AsyncClient = async_client
+        self.__circuit_breaker: CircuitBreaker = circuit_breaker
+        self.__header_factory: MediaResourceGatewayHeaderFactory = header_factory
+
+    async def get(
+        self,
+        request: Request,
+        headers: ForwardMediaResourceRequestHeaders,
+    ) -> Response:
+        trace_id = str(headers.correlation_id or uuid.uuid4())
+        upstream_headers = self.__header_factory.create(headers)
+
+        self.__event_manager.notify(
+            RequestInit(
+                request=request,
+                headers=headers,
+                upstream_headers=upstream_headers,
+                trace_id=trace_id,
+            )
+        )
+
+        try:
+            upstream_response: HttpxResponse = await self.__circuit_breaker.call(
+                identifier=headers.media_resource_url,
+                func=self.__async_client.get,
+                url=headers.media_resource_url,
+                headers=upstream_headers,
+            )
+        except (TimeoutException, CircuitOpenException) as exc:
+            logger.error(
+                "TimeoutException during proxy attempt. Upstream URL: %s",
+                LogSanitizer.sanitize(headers.media_resource_url),
+                exc_info=exc,
+            )
+
+            self.__event_manager.notify(
+                RequestTimeout(
+                    upstream_headers=upstream_headers,
+                    trace_id=trace_id,
+                    status_code=408,
+                )
+            )
+
+            raise (
+                HTTPException(504, "Gateway timeout")
+                if type(exc) == TimeoutException
+                else HTTPException(status_code=502, detail="Bad gateway")
+            )
+
+        logger.info(
+            "Proxied request to %s and received status code %s",
+            LogSanitizer.sanitize(headers.media_resource_url),
+            upstream_response.status_code,
+        )
+
+        self.__event_manager.notify(
+            RequestFinished(
+                upstream_headers=upstream_headers,
+                trace_id=trace_id,
+                status_code=upstream_response.status_code,
+                response_headers=dict(upstream_response.headers),
+            )
+        )
+
+        return Response(
+            content=upstream_response.content,
+            status_code=upstream_response.status_code,
+            headers=self.__filter_response_headers(
+                headers=dict(upstream_response.headers)
+            ),
+        )
+
+    def __filter_response_headers(self, headers: dict[Any, Any]) -> dict[str, Any]:
+        excluded_headers: set[str] = {
+            "transfer-encoding",
+            "connection",
+            "vary",
+            "x-powered-by",
+            "content-encoding",
+            "content-length",
+            "strict-transport-security",
+            "referrer",
+            "set-cookie",
+            "server",
+            "cache-control",
+            "etag",
+        }
+
+        return {
+            key: value
+            for key, value in headers.items()
+            if isinstance(key, str) and key.lower() not in excluded_headers
+        }

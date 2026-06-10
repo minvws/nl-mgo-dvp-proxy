@@ -4,9 +4,9 @@ from logging import Logger
 
 from cryptography.fernet import Fernet, InvalidToken
 from inject import autoparams
+from mgo_keystore_repositories import SecretRepository
 
 from .exceptions import CouldNotDecryptPayload
-from .repositories import SecretRepository
 
 
 class Encrypter(ABC):  # pragma: no cover

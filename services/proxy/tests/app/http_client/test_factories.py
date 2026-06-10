@@ -1,116 +1,124 @@
-import pytest
-from httpx import AsyncHTTPTransport
+from pathlib import Path
 
-import app.http_client.factories as factories
+import pytest
+from httpx import AsyncClient, AsyncHTTPTransport, Client, HTTPTransport
+
 from app.config.models import OutboundProxyConfig, TlsConfig
 from app.http_client.constants import PROXY_BYPASS_PATTERNS
-from app.http_client.factories import AsyncClientFactory
-from app.security.services import SslContextFactory
-
-"""
-At first glance one might think, what are we actually testing here?
-However, these tests ensure that the factory correctly interprets the configuration and passes the correct parameters to the constructor of the AsyncClient.
-In this case we are using a stub to capture the parameters passed to the AsyncClient constructor.
-"""
+from app.http_client.factories import AsyncClientFactory, SyncClientFactory
 
 
-class StubAsyncClient:
-    verify: bool
-    follow_redirects: bool
-    proxy: str | None
-    mounts: dict[str, AsyncHTTPTransport] | None
-
-    def __init__(
+class TestAsyncClientFactory:
+    @pytest.mark.anyio
+    async def test_create_returns_async_client_with_redirects_enabled_by_default(
         self,
-        *,
-        verify: bool,
-        follow_redirects: bool,
-        proxy: str | None,
-        mounts: dict[str, AsyncHTTPTransport] | None,
     ) -> None:
-        self.verify = verify
-        self.follow_redirects = follow_redirects
-        self.proxy = proxy
-        self.mounts = mounts
+        client = AsyncClientFactory.create()
 
+        assert isinstance(client, AsyncClient)
+        assert client.follow_redirects is True
 
-def _stub_async_client(
-    monkeypatch: pytest.MonkeyPatch,
-) -> type[StubAsyncClient]:
-    monkeypatch.setattr(factories, "AsyncClient", StubAsyncClient)
-    return StubAsyncClient
+        await client.aclose()
 
+    @pytest.mark.anyio
+    async def test_create_can_disable_follow_redirects(self) -> None:
+        client = AsyncClientFactory.create(follow_redirects=False)
 
-def test_forwards_proxy_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    StubAsyncClient = _stub_async_client(monkeypatch)
-    proxy_url: str = "http://proxy.example.com:8080"
-    proxy_config = OutboundProxyConfig(proxy_url=proxy_url)
+        assert isinstance(client, AsyncClient)
+        assert client.follow_redirects is False
 
-    client = AsyncClientFactory.create(proxy_config=proxy_config)
+        await client.aclose()
 
-    assert isinstance(client, StubAsyncClient)
-    assert client.proxy == proxy_url
-    assert client.verify is False
-    assert client.mounts is not None
-    assert sorted(client.mounts.keys()) == sorted(PROXY_BYPASS_PATTERNS)
+    def test_create_raises_for_invalid_proxy_url(self) -> None:
+        """Testing this with a raises, so that we know the proxy_config is being respected"""
+        with pytest.raises(ValueError, match="Unknown scheme for proxy URL"):
+            AsyncClientFactory.create(
+                proxy_config=OutboundProxyConfig(proxy_url="not-a-url")
+            )
 
-    for mount in client.mounts.values():
-        assert isinstance(mount, AsyncHTTPTransport)
+    def test_create_raises_for_missing_ca_cert_file(self, tmp_path: Path) -> None:
+        """Testing this with a raises, so that we know the tls_config is being respected"""
+        missing_ca_cert = tmp_path / "missing-ca.pem"
 
+        with pytest.raises(FileNotFoundError, match="No such file or directory"):
+            AsyncClientFactory.create(
+                tls_config=TlsConfig(ca_cert=str(missing_ca_cert))
+            )
 
-def test_omits_proxy_when_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
-    StubAsyncClient = _stub_async_client(monkeypatch)
+    @pytest.mark.anyio
+    async def test_create_without_proxy_has_no_bypass_mounts(self) -> None:
+        client = AsyncClientFactory.create()
 
-    client = AsyncClientFactory.create(proxy_config=None)
+        mount_patterns = {k.pattern for k in client._mounts}
+        for pattern in PROXY_BYPASS_PATTERNS:
+            assert pattern not in mount_patterns
 
-    assert isinstance(client, StubAsyncClient)
-    assert client.proxy is None
-    assert client.mounts is None
+        await client.aclose()
 
-
-def test_omits_mounts_when_proxy_url_is_none(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    StubAsyncClient = _stub_async_client(monkeypatch)
-    proxy_config = OutboundProxyConfig(proxy_url=None)
-
-    client = AsyncClientFactory.create(proxy_config=proxy_config)
-
-    assert isinstance(client, StubAsyncClient)
-    assert client.proxy is None
-    assert client.mounts is None
-
-
-def test_uses_tls_context(monkeypatch: pytest.MonkeyPatch) -> None:
-    StubAsyncClient = _stub_async_client(monkeypatch)
-    verify_context = object()
-
-    tls_config = TlsConfig(
-        ca_cert="ca.pem", client_cert="cert.pem", client_key="key.pem"
-    )
-
-    def fake_create(*, ca_cert: str, client_cert: str, client_key: str) -> object:
-        assert (ca_cert, client_cert, client_key) == (
-            "ca.pem",
-            "cert.pem",
-            "key.pem",
+    @pytest.mark.anyio
+    async def test_create_with_proxy_has_bypass_mounts(self) -> None:
+        client = AsyncClientFactory.create(
+            proxy_config=OutboundProxyConfig(proxy_url="http://proxy.example.com:8080")
         )
-        return verify_context
 
-    monkeypatch.setattr(SslContextFactory, "create", fake_create)
-    client = AsyncClientFactory.create(tls_config=tls_config)
+        mount_transports = {k.pattern: t for k, t in client._mounts.items()}
 
-    assert isinstance(client, StubAsyncClient)
-    assert client.verify is verify_context
+        for pattern in PROXY_BYPASS_PATTERNS:
+            assert pattern in mount_transports.keys()
+            assert isinstance(mount_transports[pattern], AsyncHTTPTransport)
+
+        await client.aclose()
 
 
-@pytest.mark.parametrize("follow_redirects", [True, False])
-def test_respects_follow_redirects_flag(
-    monkeypatch: pytest.MonkeyPatch, follow_redirects: bool
-) -> None:
-    StubAsyncClient = _stub_async_client(monkeypatch)
+class TestSyncClientFactory:
+    def test_create_returns_sync_client_with_redirects_enabled_by_default(self) -> None:
+        client = SyncClientFactory.create()
 
-    client = AsyncClientFactory.create(follow_redirects=follow_redirects)
+        assert isinstance(client, Client)
+        assert client.follow_redirects is True
 
-    assert isinstance(client, StubAsyncClient)
-    assert client.follow_redirects is follow_redirects
+        client.close()
+
+    def test_create_can_disable_follow_redirects(self) -> None:
+        client = SyncClientFactory.create(follow_redirects=False)
+
+        assert isinstance(client, Client)
+        assert client.follow_redirects is False
+
+        client.close()
+
+    def test_create_raises_for_invalid_proxy_url(self) -> None:
+        """Testing this with a raises, so that we know the proxy_config is being respected"""
+        with pytest.raises(ValueError, match="Unknown scheme for proxy URL"):
+            SyncClientFactory.create(
+                proxy_config=OutboundProxyConfig(proxy_url="not-a-url")
+            )
+
+    def test_create_raises_for_missing_ca_cert_file(self, tmp_path: Path) -> None:
+        """Testing this with a raises, so that we know the tls_config is being respected"""
+        missing_ca_cert = tmp_path / "missing-ca.pem"
+
+        with pytest.raises(FileNotFoundError, match="No such file or directory"):
+            SyncClientFactory.create(tls_config=TlsConfig(ca_cert=str(missing_ca_cert)))
+
+    def test_create_without_proxy_has_no_bypass_mounts(self) -> None:
+        client = SyncClientFactory.create()
+
+        mount_patterns = {k.pattern for k in client._mounts}
+        for pattern in PROXY_BYPASS_PATTERNS:
+            assert pattern not in mount_patterns
+
+        client.close()
+
+    def test_create_with_proxy_has_bypass_mounts(self) -> None:
+        client = SyncClientFactory.create(
+            proxy_config=OutboundProxyConfig(proxy_url="http://proxy.example.com:8080")
+        )
+
+        mount_transports = {k.pattern: t for k, t in client._mounts.items()}
+
+        for pattern in PROXY_BYPASS_PATTERNS:
+            assert pattern in mount_transports.keys()
+            assert isinstance(mount_transports[pattern], HTTPTransport)
+
+        client.close()

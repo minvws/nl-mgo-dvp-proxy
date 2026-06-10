@@ -7,6 +7,7 @@ from urllib.parse import urlencode, urlsplit
 
 from inject import autoparams
 from jwcrypto import jwk, jwt
+from mgo_keystore_repositories import JWKRepository
 
 from app.config.models import (
     OidcClientAuth,
@@ -14,7 +15,6 @@ from app.config.models import (
     OidcClientSecretAuth,
     OidcConfig,
 )
-from app.security.repositories import JWKRepository
 from app.security.services import Encrypter
 
 from .clients import VadHttpClient
@@ -86,7 +86,6 @@ class ClientAssertionJwtIssuer:
         new_jwt = jwt.JWT(
             header={
                 "alg": self.JWT_ALG,
-                "x5t": private_key.thumbprint(),
                 "kid": public_key.thumbprint(),
             },
             claims={

@@ -1,7 +1,7 @@
 from app.config.models import AppConfig, OidcClientJwtAuth
 from app.oidc.services import ClientAssertionJwtIssuer
 from app.security.dva_target.services import DvaTargetAssertionParser
-from app.security.repositories import (
+from mgo_keystore_repositories import (
     FilesystemJWKRepository,
     FilesystemSecretRepository,
 )

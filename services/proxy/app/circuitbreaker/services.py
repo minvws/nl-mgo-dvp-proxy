@@ -8,7 +8,7 @@ from .models import CircuitOpenException, CircuitState
 from .repositories import CircuitStateRepository
 
 
-class CircuitBreakerService:
+class CircuitBreaker:
     @inject.autoparams("logger")
     def __init__(
         self,
@@ -39,10 +39,10 @@ class CircuitBreakerService:
                 circuit.state = CircuitState.HALF_OPEN
             else:
                 self.logger.info(
-                    f"Circuit for %s is open. Function call not attempted.", identifier
+                    "Circuit for %s is open. Function call not attempted.", identifier
                 )
                 raise CircuitOpenException(
-                    f"Circuit for %s opened due to consecutive failures.", identifier
+                    "Circuit for %s opened due to consecutive failures.", identifier
                 )
 
         try:
@@ -57,8 +57,9 @@ class CircuitBreakerService:
             if circuit.fail_count >= self.fail_max:
                 circuit.open()
                 self.logger.warning(
-                    f"Circuit for {identifier} opened due to consecutive failures.",
-                    e,
+                    "Circuit for %s opened due to consecutive failures.",
+                    identifier,
+                    exc_info=e,
                 )
 
             self.repository.save_circuit(circuit)

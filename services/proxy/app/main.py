@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .authentication.router import router as auth_router
-from .bindings import configure_bindings
+from .bindings import ensure_bindings_configured
 from .constants import APP_NAME
 from .docs.router import router as docs_router
 from .exception_handlers import ExceptionHandlers
@@ -17,10 +17,7 @@ from .version.router import router as index_router
 
 
 def create_app() -> FastAPI:
-    if not inject.is_configured():
-        inject.configure(
-            lambda binder: configure_bindings(binder=binder, config_file="app.conf"),
-        )
+    ensure_bindings_configured()
 
     version_info: VersionInfo = inject.instance(VersionInfo)
 

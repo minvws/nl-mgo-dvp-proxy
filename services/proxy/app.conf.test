@@ -22,6 +22,9 @@ signature_lifetime_secs=900
 auth_redirect_uri=/auth/callback
 mock_oauth_servers=true
 
+[medmij_whitelist]
+;url=
+
 [dva_target]
 jwe_encryption_private_key=./secrets/dva_target/jwe.key
 jwt_signing_public_key=./secrets/dva_target/placeholder_jwt_signing.pub

@@ -1,3 +1,5 @@
+import time
+
 import pytest
 from httpx import Response
 from pytest_mock import MockerFixture
@@ -43,7 +45,10 @@ class TestMetricService:
         assert metric_service.sanitize_url(url) == expected
 
     def test_measure_request_latency_timing_with_correct_parameters(
-        self, mocker: MockerFixture, metric_service: MetricService
+        self,
+        mocker: MockerFixture,
+        monkeypatch: pytest.MonkeyPatch,
+        metric_service: MetricService,
     ) -> None:
         mocked_start_time = 1000
         dva_url = "https://test.dva.key"
@@ -51,7 +56,7 @@ class TestMetricService:
         expected_latency = 1000
 
         timing_spy = mocker.spy(NoOpMetricClient, "timing")
-        mocker.patch("time.time", return_value=mocked_current_time)
+        monkeypatch.setattr(time, "perf_counter", lambda: mocked_current_time)
 
         metric_service.measure_request_latency(
             start_time=mocked_start_time, dva_url=dva_url
@@ -91,16 +96,19 @@ class TestMetricService:
         )
 
     def test_measure_response_size(
-        self, mocker: MockerFixture, metric_service: MetricService
+        self,
+        mocker: MockerFixture,
+        monkeypatch: pytest.MonkeyPatch,
+        metric_service: MetricService,
     ) -> None:
         dva_url = "https://test.dva.key"
         response = Response(200, content=b" " * 1025)
 
         incr_spy = mocker.spy(NoOpMetricClient, "incr")
-        mocker.patch.object(
+        monkeypatch.setattr(
             ResponseSizeBucket,
             "determine_bucket",
-            return_value="test_dva_key.response.size.1-1024",
+            lambda self, key, value: "test_dva_key.response.size.1-1024",
         )
 
         metric_service.measure_response_size(dva_url, response)
